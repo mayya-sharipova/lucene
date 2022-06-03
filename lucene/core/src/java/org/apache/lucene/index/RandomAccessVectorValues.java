@@ -28,25 +28,25 @@ import org.apache.lucene.util.BytesRef;
 public interface RandomAccessVectorValues {
 
   /** Return the number of vector values */
-  int size();
+  long size();
 
   /** Return the dimension of the returned vector values */
   int dimension();
 
   /**
    * Return the vector value indexed at the given ordinal. The provided floating point array may be
-   * shared and overwritten by subsequent calls to this method and {@link #binaryValue(int)}.
+   * shared and overwritten by subsequent calls to this method and {@link #binaryValue(long)}.
    *
    * @param targetOrd a valid ordinal, &ge; 0 and &lt; {@link #size()}.
    */
-  float[] vectorValue(int targetOrd) throws IOException;
+  float[] vectorValue(long targetOrd) throws IOException;
 
   /**
    * Return the vector indexed at the given ordinal value as an array of bytes in a BytesRef; these
    * are the bytes corresponding to the float array. The provided bytes may be shared and
-   * overwritten by subsequent calls to this method and {@link #vectorValue(int)}.
+   * overwritten by subsequent calls to this method and {@link #vectorValue(long)}.
    *
    * @param targetOrd a valid ordinal, &ge; 0 and &lt; {@link #size()}.
    */
-  BytesRef binaryValue(int targetOrd) throws IOException;
+  BytesRef binaryValue(long targetOrd) throws IOException;
 }

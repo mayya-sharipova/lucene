@@ -93,6 +93,38 @@ public class TestKnnGraph extends LuceneTestCase {
     M = Lucene92HnswVectorsFormat.DEFAULT_MAX_CONN;
   }
 
+
+  //TODO: test 1) diff dims 2) diff number of values per doc 3)index sorted on another field
+  public void testMultipleVectorsPerField() throws Exception {
+    final int dims = 3;
+    FieldType knnFieldType = KnnVectorField.createFieldType(dims, similarityFunction);
+
+//    float[][] values = new float[2][dims];
+//    for (int i = 0; i < values.length; i++) {
+//      for (int j = 0; j < dims; j++) {
+//        values[i][j] = random().nextFloat();
+//      }
+//    }
+
+    float[][] vectors = new float[2][dims];
+    vectors[0] = new float[]{1f, 1f, 1f};
+    vectors[1] = new float[]{2f, 2f, 2f};
+
+
+    try (Directory dir = newDirectory();
+         IndexWriter iw = new IndexWriter(dir, newIndexWriterConfig(null).setCodec(codec))) {
+      Document doc = new Document();
+      for (float[] vector: vectors) {
+        doc.add(new KnnVectorField(KNN_GRAPH_FIELD, vector, knnFieldType));
+      }
+      String idString = Integer.toString(0);
+      doc.add(new StringField("id", idString, Field.Store.YES));
+      doc.add(new SortedDocValuesField("id", new BytesRef(idString)));
+      iw.addDocument(doc);
+
+    }
+  }
+
   /** Basic test of creating documents in a graph */
   public void testBasic() throws Exception {
     try (Directory dir = newDirectory();
@@ -463,7 +495,7 @@ public class TestKnnGraph extends LuceneTestCase {
           }
           int id = Integer.parseInt(reader.document(i).get("id"));
           // documents with KnnGraphValues have the expected vectors
-          float[] scratch = vectorValues.vectorValue();
+          float[] scratch = vectorValues.nextVectorValue();
           assertArrayEquals(
               "vector did not match for doc " + i + ", id=" + id + ": " + Arrays.toString(scratch),
               values[id],

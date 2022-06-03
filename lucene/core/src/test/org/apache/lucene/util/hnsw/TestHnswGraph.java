@@ -95,7 +95,7 @@ public class TestHnswGraph extends LuceneTestCase {
             indexedDoc++;
           }
           Document doc = new Document();
-          doc.add(new KnnVectorField("field", v2.vectorValue(), similarityFunction));
+          doc.add(new KnnVectorField("field", v2.nextVectorValue(), similarityFunction));
           doc.add(new StoredField("id", v2.docID()));
           iw.addDocument(doc);
           nVec++;
@@ -504,7 +504,12 @@ public class TestHnswGraph extends LuceneTestCase {
     }
 
     @Override
-    public float[] vectorValue() {
+    public int docValueCount() {
+      return 1;
+    }
+
+    @Override
+    public float[] nextVectorValue() {
       return vectorValue(doc);
     }
 
@@ -577,7 +582,7 @@ public class TestHnswGraph extends LuceneTestCase {
         break;
       }
       assertArrayEquals(
-          "vectors do not match for doc=" + uDoc, u.vectorValue(), v.vectorValue(), 1e-4f);
+          "vectors do not match for doc=" + uDoc, u.nextVectorValue(), v.nextVectorValue(), 1e-4f);
     }
   }
 

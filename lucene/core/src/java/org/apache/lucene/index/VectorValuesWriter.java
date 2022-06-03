@@ -21,6 +21,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.KnnVectorsWriter;
@@ -31,6 +33,8 @@ import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Counter;
 import org.apache.lucene.util.RamUsageEstimator;
+import org.apache.lucene.util.packed.PackedInts;
+import org.apache.lucene.util.packed.PackedLongValues;
 
 /**
  * Buffers up pending vector value(s) per doc, then flushes when segment flushes.
@@ -41,10 +45,13 @@ class VectorValuesWriter {
 
   private final FieldInfo fieldInfo;
   private final Counter iwBytesUsed;
+  //TODO a better data structure than List
   private final List<float[]> vectors = new ArrayList<>();
+  private PackedLongValues.Builder pendingCounts; // count of values per doc
   private final DocsWithFieldSet docsWithField;
 
   private int lastDocID = -1;
+  private int lastDocValuesCount = 0;
 
   private long bytesUsed;
 
@@ -66,12 +73,7 @@ class VectorValuesWriter {
    * @throws IllegalArgumentException if a value has already been added to the given document
    */
   public void addValue(int docID, float[] vectorValue) {
-    if (docID == lastDocID) {
-      throw new IllegalArgumentException(
-          "VectorValuesField \""
-              + fieldInfo.name
-              + "\" appears more than once in this document (only one value is allowed per field)");
-    }
+    assert docID >= lastDocID;
     if (vectorValue.length != fieldInfo.getVectorDimension()) {
       throw new IllegalArgumentException(
           "Attempt to index a vector of dimension "
@@ -81,11 +83,33 @@ class VectorValuesWriter {
               + "\" has dimension "
               + fieldInfo.getVectorDimension());
     }
-    assert docID > lastDocID;
-    docsWithField.add(docID);
+    if (docID != lastDocID) {
+      finishLastDoc();
+      lastDocID = docID;
+    }
     vectors.add(ArrayUtil.copyOfSubArray(vectorValue, 0, vectorValue.length));
+    lastDocValuesCount++;
     updateBytesUsed();
-    lastDocID = docID;
+  }
+
+  private void finishLastDoc() {
+    if (lastDocID == -1) {
+      return;
+    }
+    // record the number of values for this doc
+    if (pendingCounts != null) {
+      pendingCounts.add(lastDocValuesCount);
+    } else if (lastDocValuesCount != 1) {
+      // initialize pendingCounts at the first occurrence of doc with multiple values
+      pendingCounts = PackedLongValues.deltaPackedBuilder(PackedInts.COMPACT);
+      for (int i = 0; i < docsWithField.cardinality(); ++i) {
+        pendingCounts.add(1);
+      }
+      pendingCounts.add(lastDocValuesCount);
+    }
+    lastDocValuesCount = 0;
+
+    docsWithField.add(lastDocID);
   }
 
   private void updateBytesUsed() {
@@ -94,7 +118,8 @@ class VectorValuesWriter {
             + vectors.size()
                 * (RamUsageEstimator.NUM_BYTES_OBJECT_REF
                     + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER)
-            + vectors.size() * vectors.get(0).length * Float.BYTES;
+            + vectors.size() * vectors.get(0).length * Float.BYTES
+            + (pendingCounts == null ? 0 : pendingCounts.ramBytesUsed());
     if (iwBytesUsed != null) {
       iwBytesUsed.addAndGet(newBytesUsed - bytesUsed);
     }
@@ -118,26 +143,40 @@ class VectorValuesWriter {
           }
 
           @Override
-          public void close() throws IOException {
+          public void close() {
             throw new UnsupportedOperationException();
           }
 
           @Override
-          public void checkIntegrity() throws IOException {
+          public void checkIntegrity() {
             throw new UnsupportedOperationException();
           }
 
           @Override
           public VectorValues getVectorValues(String field) throws IOException {
-            VectorValues vectorValues =
-                new BufferedVectorValues(docsWithField, vectors, fieldInfo.getVectorDimension());
-            return sortMap != null ? new SortingVectorValues(vectorValues, sortMap) : vectorValues;
+            if (pendingCounts == null) {
+              VectorValues vectorValues = new BufferedVectorValues(docsWithField, vectors,
+                  fieldInfo.getVectorDimension());
+              if (sortMap == null) {
+                return vectorValues;
+              } else {
+                return new SortingVectorValues(vectorValues, sortMap);
+              }
+            } else {
+              PackedLongValues valueCounts = pendingCounts.build();
+              VectorValues vectorValues = new MultipleBufferedVectorValues(docsWithField, valueCounts,
+                  vectors, fieldInfo.getVectorDimension());
+              if (sortMap == null) {
+                return vectorValues;
+              } else {
+                return new MultipleSortingVectorValues(vectorValues, sortMap);
+              }
+            }
           }
 
           @Override
           public TopDocs search(
-              String field, float[] target, int k, Bits acceptDocs, int visitedLimit)
-              throws IOException {
+              String field, float[] target, int k, Bits acceptDocs, int visitedLimit) {
             throw new UnsupportedOperationException();
           }
         };
@@ -145,8 +184,243 @@ class VectorValuesWriter {
     knnVectorsWriter.writeField(fieldInfo, knnVectorsReader);
   }
 
-  static class SortingVectorValues extends VectorValues
+  static class MultipleSortingVectorValues extends VectorValues
       implements RandomAccessVectorValuesProducer {
+
+    private final VectorValues values;
+    private final RandomAccessVectorValues randomAccess;
+    // map newDocID -> valueCounts
+    private final int[] newValueCounts;
+    // map newDocID -> offset in randomAccess from which to read values
+    private final long[] valuesOffsets;
+    private final long[] ordMap;
+
+    private int docId = -1;
+    private int numValues = -1;
+    private long currentOffset = -1;
+    private long currentEndOffset;
+
+    MultipleSortingVectorValues(VectorValues values, Sorter.DocMap sortMap) throws IOException {
+      this.values = values;
+      newValueCounts = new int[sortMap.size()];
+      valuesOffsets = new long[sortMap.size()];
+      randomAccess = ((RandomAccessVectorValuesProducer) values).randomAccess();
+
+      long valuesOffset = 0;
+      int docID;
+      while ((docID = values.nextDoc()) != NO_MORE_DOCS) {
+        int newDocID = sortMap.oldToNew(docID);
+        int numValues = values.docValueCount();
+        newValueCounts[newDocID] = numValues;
+        valuesOffsets[newDocID] = valuesOffset;
+        for (int i = 0; i < numValues; i++) {
+          values.nextVectorValue();
+          valuesOffset++;
+        }
+      }
+
+      // set up ordMap to map from new dense ordinal to old dense ordinal
+      ordMap = new long[(int) values.size()];
+      int ord = 0;
+      for (int newDocId = 0; newDocId < newValueCounts.length; newDocId++) {
+        int numValues = newValueCounts[newDocId];
+        for (int j = 0; j < numValues; j++) {
+          ordMap[ord++] = valuesOffsets[newDocId] + j;
+        }
+      }
+    }
+
+    @Override
+    public int docID() {
+      return docId;
+    }
+
+    @Override
+    public int nextDoc() throws IOException {
+      do {
+        docId++;
+        if (docId >= newValueCounts.length) {
+          return docId = NO_MORE_DOCS;
+        }
+      } while (newValueCounts[docId] == 0);
+      numValues = newValueCounts[docId];
+      currentOffset = valuesOffsets[docId];
+      currentEndOffset = currentOffset + numValues;
+      return docId;
+    }
+
+    @Override
+    public int docValueCount() {
+      return numValues;
+    }
+
+    @Override
+    public BytesRef nextBinaryValue() throws IOException {
+      if (currentOffset == currentEndOffset) {
+        throw new AssertionError();
+      } else {
+        return randomAccess.binaryValue(currentOffset++);
+      }
+    }
+
+    @Override
+    public float[] nextVectorValue() throws IOException {
+      if (currentOffset == currentEndOffset) {
+        throw new AssertionError();
+      } else {
+        return randomAccess.vectorValue(currentOffset++);
+      }
+    }
+
+    @Override
+    public int dimension() {
+      return values.dimension();
+    }
+
+    @Override
+    public long size() {
+      return values.size();
+    }
+
+    @Override
+    public int advance(int target) throws IOException {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long cost() {
+      return values.cost();
+    }
+
+    @Override
+    public RandomAccessVectorValues randomAccess() throws IOException {
+
+      // Must make a new delegate randomAccess so that we have our own distinct float[]
+      final RandomAccessVectorValues delegateRA =
+          ((RandomAccessVectorValuesProducer) MultipleSortingVectorValues.this.values).randomAccess();
+
+      return new RandomAccessVectorValues() {
+
+        @Override
+        public long size() {
+          return delegateRA.size();
+        }
+
+        @Override
+        public int dimension() {
+          return delegateRA.dimension();
+        }
+
+        @Override
+        public float[] vectorValue(long targetOrd) throws IOException {
+          return delegateRA.vectorValue(ordMap[(int) targetOrd]);
+        }
+
+        @Override
+        public BytesRef binaryValue(long targetOrd) {
+          throw new UnsupportedOperationException();
+        }
+      };
+    }
+  }
+
+  private static class BufferedVectorValues extends VectorValues
+          implements RandomAccessVectorValues, RandomAccessVectorValuesProducer {
+
+    final DocsWithFieldSet docsWithField;
+
+    // These are always the vectors of a VectorValuesWriter, which are copied when added to it
+    final List<float[]> vectors;
+    final int dimension;
+
+    final ByteBuffer buffer;
+    final BytesRef binaryValue;
+    final ByteBuffer raBuffer;
+    final BytesRef raBinaryValue;
+
+    DocIdSetIterator docsWithFieldIter;
+    int ord = -1;
+
+    BufferedVectorValues(DocsWithFieldSet docsWithField, List<float[]> vectors, int dimension) {
+      this.docsWithField = docsWithField;
+      this.vectors = vectors;
+      this.dimension = dimension;
+      buffer = ByteBuffer.allocate(dimension * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+      binaryValue = new BytesRef(buffer.array());
+      raBuffer = ByteBuffer.allocate(dimension * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+      raBinaryValue = new BytesRef(raBuffer.array());
+      docsWithFieldIter = docsWithField.iterator();
+    }
+
+    @Override
+    public RandomAccessVectorValues randomAccess() {
+      return new BufferedVectorValues(docsWithField, vectors, dimension);
+    }
+
+    @Override
+    public int dimension() {
+      return dimension;
+    }
+
+    @Override
+    public long size() {
+      return vectors.size();
+    }
+
+    @Override
+    public int docValueCount() {
+      return 1;
+    }
+
+    @Override
+    public BytesRef nextBinaryValue() {
+      buffer.asFloatBuffer().put(nextVectorValue());
+      return binaryValue;
+    }
+
+    @Override
+    public BytesRef binaryValue(long targetOrd) {
+      raBuffer.asFloatBuffer().put(vectors.get((int) targetOrd));
+      return raBinaryValue;
+    }
+
+    @Override
+    public float[] nextVectorValue() {
+      return vectors.get(ord);
+    }
+
+    @Override
+    public float[] vectorValue(long targetOrd) {
+      return vectors.get((int) targetOrd);
+    }
+
+    @Override
+    public int docID() {
+      return docsWithFieldIter.docID();
+    }
+
+    @Override
+    public int nextDoc() throws IOException {
+      int docID = docsWithFieldIter.nextDoc();
+      if (docID != NO_MORE_DOCS) {
+        ++ord;
+      }
+      return docID;
+    }
+
+    @Override
+    public int advance(int target) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long cost() {
+      return docsWithFieldIter.cost();
+    }
+  }
+
+  static class SortingVectorValues extends VectorValues
+          implements RandomAccessVectorValuesProducer {
 
     private final VectorValues delegate;
     private final RandomAccessVectorValues randomAccess;
@@ -195,12 +469,17 @@ class VectorValuesWriter {
     }
 
     @Override
-    public BytesRef binaryValue() throws IOException {
+    public int docValueCount() {
+      return 0;
+    }
+
+    @Override
+    public BytesRef nextBinaryValue() throws IOException {
       return randomAccess.binaryValue(docIdOffsets[docId] - 1);
     }
 
     @Override
-    public float[] vectorValue() throws IOException {
+    public float[] nextVectorValue() throws IOException {
       return randomAccess.vectorValue(docIdOffsets[docId] - 1);
     }
 
@@ -210,7 +489,7 @@ class VectorValuesWriter {
     }
 
     @Override
-    public int size() {
+    public long size() {
       return delegate.size();
     }
 
@@ -221,7 +500,7 @@ class VectorValuesWriter {
 
     @Override
     public long cost() {
-      return size();
+      return delegate.cost();
     }
 
     @Override
@@ -229,12 +508,12 @@ class VectorValuesWriter {
 
       // Must make a new delegate randomAccess so that we have our own distinct float[]
       final RandomAccessVectorValues delegateRA =
-          ((RandomAccessVectorValuesProducer) SortingVectorValues.this.delegate).randomAccess();
+              ((RandomAccessVectorValuesProducer) SortingVectorValues.this.delegate).randomAccess();
 
       return new RandomAccessVectorValues() {
 
         @Override
-        public int size() {
+        public long size() {
           return delegateRA.size();
         }
 
@@ -244,49 +523,58 @@ class VectorValuesWriter {
         }
 
         @Override
-        public float[] vectorValue(int targetOrd) throws IOException {
-          return delegateRA.vectorValue(ordMap[targetOrd]);
+        public float[] vectorValue(long targetOrd) throws IOException {
+          return delegateRA.vectorValue(ordMap[(int) targetOrd]);
         }
 
         @Override
-        public BytesRef binaryValue(int targetOrd) {
+        public BytesRef binaryValue(long targetOrd) {
           throw new UnsupportedOperationException();
         }
       };
     }
   }
 
-  private static class BufferedVectorValues extends VectorValues
+  private static class MultipleBufferedVectorValues extends VectorValues
       implements RandomAccessVectorValues, RandomAccessVectorValuesProducer {
-
-    final DocsWithFieldSet docsWithField;
 
     // These are always the vectors of a VectorValuesWriter, which are copied when added to it
     final List<float[]> vectors;
     final int dimension;
+    final DocsWithFieldSet docsWithField;
+    final PackedLongValues valueCounts;
+    final Iterator<float[]> valuesIter;
+    final PackedLongValues.Iterator valueCountsIter;
+    final DocIdSetIterator docsWithFieldIter;
 
     final ByteBuffer buffer;
     final BytesRef binaryValue;
     final ByteBuffer raBuffer;
     final BytesRef raBinaryValue;
 
-    DocIdSetIterator docsWithFieldIter;
-    int ord = -1;
+    private int valueCount;
+    private int valueUpto;
 
-    BufferedVectorValues(DocsWithFieldSet docsWithField, List<float[]> vectors, int dimension) {
+    MultipleBufferedVectorValues(DocsWithFieldSet docsWithField, PackedLongValues valueCounts,
+          List<float[]> vectors, int dimension) {
       this.docsWithField = docsWithField;
+      this.valueCounts = valueCounts;
       this.vectors = vectors;
       this.dimension = dimension;
+      valuesIter = vectors.iterator();
+      valueCountsIter = valueCounts.iterator();
+      docsWithFieldIter = docsWithField.iterator();
+
       buffer = ByteBuffer.allocate(dimension * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
       binaryValue = new BytesRef(buffer.array());
       raBuffer = ByteBuffer.allocate(dimension * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
       raBinaryValue = new BytesRef(raBuffer.array());
-      docsWithFieldIter = docsWithField.iterator();
+
     }
 
     @Override
     public RandomAccessVectorValues randomAccess() {
-      return new BufferedVectorValues(docsWithField, vectors, dimension);
+      return new MultipleBufferedVectorValues(docsWithField, valueCounts, vectors, dimension);
     }
 
     @Override
@@ -295,30 +583,39 @@ class VectorValuesWriter {
     }
 
     @Override
-    public int size() {
+    public long size() {
       return vectors.size();
     }
 
     @Override
-    public BytesRef binaryValue() {
-      buffer.asFloatBuffer().put(vectorValue());
+    public int docValueCount() {
+      return valueCount;
+    }
+
+    @Override
+    public BytesRef nextBinaryValue() {
+      buffer.asFloatBuffer().put(nextVectorValue());
       return binaryValue;
     }
 
     @Override
-    public BytesRef binaryValue(int targetOrd) {
-      raBuffer.asFloatBuffer().put(vectors.get(targetOrd));
+    public float[] nextVectorValue() {
+      if (valueUpto == valueCount) {
+        throw new IllegalStateException();
+      }
+      valueUpto++;
+      return valuesIter.next();
+    }
+
+    @Override
+    public BytesRef binaryValue(long targetOrd) {
+      raBuffer.asFloatBuffer().put(vectors.get((int) targetOrd));
       return raBinaryValue;
     }
 
     @Override
-    public float[] vectorValue() {
-      return vectors.get(ord);
-    }
-
-    @Override
-    public float[] vectorValue(int targetOrd) {
-      return vectors.get(targetOrd);
+    public float[] vectorValue(long targetOrd) {
+      return vectors.get((int) targetOrd);
     }
 
     @Override
@@ -328,9 +625,14 @@ class VectorValuesWriter {
 
     @Override
     public int nextDoc() throws IOException {
+      for (int i = valueUpto; i < valueCount; i++) {
+        valuesIter.next();
+      }
+
       int docID = docsWithFieldIter.nextDoc();
       if (docID != NO_MORE_DOCS) {
-        ++ord;
+        valueCount = Math.toIntExact(valueCountsIter.next());
+        valueUpto = 0;
       }
       return docID;
     }

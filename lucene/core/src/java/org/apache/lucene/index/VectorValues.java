@@ -39,32 +39,42 @@ public abstract class VectorValues extends DocIdSetIterator {
   public abstract int dimension();
 
   /**
-   * TODO: should we use cost() for this? We rely on its always being exactly the number of
-   * documents having a value for this field, which is not guaranteed by the cost() contract, but in
-   * all the implementations so far they are the same.
+   * The total number of vectors in this iterator.
+   *  If there are multiple vectors per document, this number
+   *  can be larger than the number of documents having a value for this field.
    *
    * @return the number of vectors returned by this iterator
    */
-  public abstract int size();
+  public abstract long size();
 
   /**
-   * Return the vector value for the current document ID. It is illegal to call this method when the
-   * iterator is not positioned: before advancing, or after failing to advance. The returned array
-   * may be shared across calls, re-used, and modified as the iterator advances.
-   *
-   * @return the vector value
-   */
-  public abstract float[] vectorValue() throws IOException;
+   * Retrieves the number of values for the current document. This must always be greater than zero.
+  */
+  public abstract int docValueCount();
 
   /**
-   * Return the binary encoded vector value for the current document ID. These are the bytes
-   * corresponding to the float array return by {@link #vectorValue}. It is illegal to call this
-   * method when the iterator is not positioned: before advancing, or after failing to advance. The
-   * returned storage may be shared across calls, re-used and modified as the iterator advances.
+   * Iterates and returns the next vector value in the current document. Do not call this more
+   * than {@link#docValueCount} times for the document. It is illegal to call this method
+   * when the iterator is not positioned: before advancing, or after failing to advance.
+   * The returned array may be shared across calls, re-used, and modified as the iterator advances.
    *
-   * @return the binary value
-   */
-  public BytesRef binaryValue() throws IOException {
+   * @return the next vector value for the current document ID
+  */
+  public abstract float[] nextVectorValue() throws IOException;
+
+
+  /**
+   * Iterates and returns the next binary encoded vector value for the current document.
+   * These are the bytes corresponding to the float array return by {@link #nextVectorValue}.
+   * Do not call this more than {@link#docValueCount} times for the document.
+   * It is illegal to call this method when the iterator is not positioned: before advancing,
+   * or after failing to advance.
+   *
+   * The returned storage may be shared across calls, re-used, and modified as the iterator advances.
+   *
+   * @return the next binary encoded vector value for the current document ID
+  */
+  public BytesRef nextBinaryValue() throws IOException {
     throw new UnsupportedOperationException();
   }
 
@@ -76,7 +86,12 @@ public abstract class VectorValues extends DocIdSetIterator {
       new VectorValues() {
 
         @Override
-        public int size() {
+        public long size() {
+          return 0;
+        }
+
+        @Override
+        public int docValueCount() {
           return 0;
         }
 
@@ -86,7 +101,7 @@ public abstract class VectorValues extends DocIdSetIterator {
         }
 
         @Override
-        public float[] vectorValue() {
+        public float[] nextVectorValue() {
           throw new IllegalStateException(
               "Attempt to get vectors from EMPTY values (which was not advanced)");
         }

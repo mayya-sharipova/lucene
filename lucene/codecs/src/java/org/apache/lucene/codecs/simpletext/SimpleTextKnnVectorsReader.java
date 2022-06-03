@@ -169,7 +169,7 @@ public class SimpleTextKnnVectorsReader extends KnnVectorsReader {
         break;
       }
 
-      float[] vector = values.vectorValue();
+      float[] vector = values.nextVectorValue();
       float score = vectorSimilarity.convertToScore(vectorSimilarity.compare(vector, target));
       topK.insertWithOverflow(new ScoreDoc(doc, score));
       numVisited++;
@@ -288,12 +288,17 @@ public class SimpleTextKnnVectorsReader extends KnnVectorsReader {
     }
 
     @Override
-    public float[] vectorValue() {
+    public int docValueCount() {
+      return 1;
+    }
+
+    @Override
+    public float[] nextVectorValue() {
       return values[curOrd];
     }
 
     @Override
-    public BytesRef binaryValue() {
+    public BytesRef nextBinaryValue() {
       ByteBuffer.wrap(binaryValue.bytes).asFloatBuffer().get(values[curOrd]);
       return binaryValue;
     }

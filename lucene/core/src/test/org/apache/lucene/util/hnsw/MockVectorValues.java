@@ -64,7 +64,12 @@ class MockVectorValues extends VectorValues
   }
 
   @Override
-  public float[] vectorValue() {
+  public int docValueCount() {
+    return 1;
+  }
+
+  @Override
+  public float[] nextVectorValue() {
     if (LuceneTestCase.random().nextBoolean()) {
       return values[pos];
     } else {

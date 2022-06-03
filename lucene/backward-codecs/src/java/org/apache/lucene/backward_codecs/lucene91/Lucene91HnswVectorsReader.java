@@ -442,14 +442,19 @@ public final class Lucene91HnswVectorsReader extends KnnVectorsReader {
     }
 
     @Override
-    public float[] vectorValue() throws IOException {
+    public int docValueCount() {
+      return 1;
+    }
+
+    @Override
+    public float[] nextVectorValue() throws IOException {
       dataIn.seek((long) ord * byteSize);
       dataIn.readFloats(value, 0, value.length);
       return value;
     }
 
     @Override
-    public BytesRef binaryValue() throws IOException {
+    public BytesRef nextBinaryValue() throws IOException {
       dataIn.seek((long) ord * byteSize);
       dataIn.readBytes(byteBuffer.array(), byteBuffer.arrayOffset(), byteSize, false);
       return binaryValue;

@@ -234,7 +234,7 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
           LeafReader r = getOnlyLeafReader(reader);
           VectorValues vectorValues = r.getVectorValues(fieldName);
           assertEquals(0, vectorValues.nextDoc());
-          assertEquals(0, vectorValues.vectorValue()[0], 0);
+          assertEquals(0, vectorValues.nextVectorValue()[0], 0);
           assertEquals(NO_MORE_DOCS, vectorValues.nextDoc());
         }
       }
@@ -258,7 +258,7 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
           LeafReader r = getOnlyLeafReader(reader);
           VectorValues vectorValues = r.getVectorValues(fieldName);
           assertNotEquals(NO_MORE_DOCS, vectorValues.nextDoc());
-          assertEquals(0, vectorValues.vectorValue()[0], 0);
+          assertEquals(0, vectorValues.nextVectorValue()[0], 0);
           assertEquals(NO_MORE_DOCS, vectorValues.nextDoc());
         }
       }
@@ -285,10 +285,10 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
           VectorValues vectorValues = r.getVectorValues(fieldName);
           assertEquals(0, vectorValues.nextDoc());
           // The merge order is randomized, we might get 0 first, or 1
-          float value = vectorValues.vectorValue()[0];
+          float value = vectorValues.nextVectorValue()[0];
           assertTrue(value == 0 || value == 1);
           assertEquals(1, vectorValues.nextDoc());
-          value += vectorValues.vectorValue()[0];
+          value += vectorValues.nextVectorValue()[0];
           assertEquals(1, value, 0);
         }
       }
@@ -629,7 +629,7 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
             if (vectors != null) {
               docCount += vectors.size();
               while (vectors.nextDoc() != NO_MORE_DOCS) {
-                checksum += vectors.vectorValue()[0];
+                checksum += vectors.nextVectorValue()[0];
               }
             }
           }
@@ -663,11 +663,11 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
         LeafReader r = getOnlyLeafReader(reader);
         VectorValues vectorValues = r.getVectorValues(fieldName);
         vectorValues.nextDoc();
-        assertEquals(1, vectorValues.vectorValue()[0], 0);
+        assertEquals(1, vectorValues.nextVectorValue()[0], 0);
         vectorValues.nextDoc();
-        assertEquals(1, vectorValues.vectorValue()[0], 0);
+        assertEquals(1, vectorValues.nextVectorValue()[0], 0);
         vectorValues.nextDoc();
-        assertEquals(2, vectorValues.vectorValue()[0], 0);
+        assertEquals(2, vectorValues.nextVectorValue()[0], 0);
       }
     }
   }
@@ -690,11 +690,11 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
         assertEquals(2, vectorValues.dimension());
         assertEquals(3, vectorValues.size());
         assertEquals("1", leaf.document(vectorValues.nextDoc()).get("id"));
-        assertEquals(-1f, vectorValues.vectorValue()[0], 0);
+        assertEquals(-1f, vectorValues.nextVectorValue()[0], 0);
         assertEquals("2", leaf.document(vectorValues.nextDoc()).get("id"));
-        assertEquals(1, vectorValues.vectorValue()[0], 0);
+        assertEquals(1, vectorValues.nextVectorValue()[0], 0);
         assertEquals("4", leaf.document(vectorValues.nextDoc()).get("id"));
-        assertEquals(0, vectorValues.vectorValue()[0], 0);
+        assertEquals(0, vectorValues.nextVectorValue()[0], 0);
         assertEquals(NO_MORE_DOCS, vectorValues.nextDoc());
       }
     }
@@ -724,25 +724,25 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
         assertEquals(1, vectorValues.dimension());
         assertEquals(2, vectorValues.size());
         vectorValues.nextDoc();
-        assertEquals(1f, vectorValues.vectorValue()[0], 0);
+        assertEquals(1f, vectorValues.nextVectorValue()[0], 0);
         vectorValues.nextDoc();
-        assertEquals(2f, vectorValues.vectorValue()[0], 0);
+        assertEquals(2f, vectorValues.nextVectorValue()[0], 0);
         assertEquals(NO_MORE_DOCS, vectorValues.nextDoc());
 
         VectorValues vectorValues2 = leaf.getVectorValues("field2");
         assertEquals(3, vectorValues2.dimension());
         assertEquals(2, vectorValues2.size());
         vectorValues2.nextDoc();
-        assertEquals(2f, vectorValues2.vectorValue()[1], 0);
+        assertEquals(2f, vectorValues2.nextVectorValue()[1], 0);
         vectorValues2.nextDoc();
-        assertEquals(2f, vectorValues2.vectorValue()[1], 0);
+        assertEquals(2f, vectorValues2.nextVectorValue()[1], 0);
         assertEquals(NO_MORE_DOCS, vectorValues2.nextDoc());
 
         VectorValues vectorValues3 = leaf.getVectorValues("field3");
         assertEquals(3, vectorValues3.dimension());
         assertEquals(1, vectorValues3.size());
         vectorValues3.nextDoc();
-        assertEquals(1f, vectorValues3.vectorValue()[0], 0);
+        assertEquals(1f, vectorValues3.nextVectorValue()[0], 0);
         assertEquals(NO_MORE_DOCS, vectorValues3.nextDoc());
       }
     }
@@ -804,7 +804,7 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
           totalSize += vectorValues.size();
           int docId;
           while ((docId = vectorValues.nextDoc()) != NO_MORE_DOCS) {
-            float[] v = vectorValues.vectorValue();
+            float[] v = vectorValues.nextVectorValue();
             assertEquals(dimension, v.length);
             String idString = ctx.reader().document(docId).getField("id").stringValue();
             int id = Integer.parseInt(idString);
@@ -922,7 +922,7 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
           int docId;
           int numLiveDocsWithVectors = 0;
           while ((docId = vectorValues.nextDoc()) != NO_MORE_DOCS) {
-            float[] v = vectorValues.vectorValue();
+            float[] v = vectorValues.nextVectorValue();
             assertEquals(dimension, v.length);
             String idString = ctx.reader().document(docId).getField("id").stringValue();
             int id = Integer.parseInt(idString);
@@ -1128,7 +1128,7 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
           if (vectors != null) {
             docCount += vectors.size();
             while (vectors.nextDoc() != NO_MORE_DOCS) {
-              checksum += vectors.vectorValue()[0];
+              checksum += vectors.nextVectorValue()[0];
               Document doc = ctx.reader().document(vectors.docID(), Set.of("id"));
               sumDocIds += Integer.parseInt(doc.get("id"));
             }

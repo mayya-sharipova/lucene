@@ -91,7 +91,7 @@ public class SimpleTextKnnVectorsWriter extends KnnVectorsWriter {
 
   private void writeVectorValue(VectorValues vectors) throws IOException {
     // write vector value
-    float[] value = vectors.vectorValue();
+    float[] value = vectors.nextVectorValue();
     assert value.length == vectors.dimension();
     write(vectorData, Arrays.toString(value));
     newline(vectorData);
