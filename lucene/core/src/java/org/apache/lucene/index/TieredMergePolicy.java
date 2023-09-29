@@ -86,11 +86,11 @@ public class TieredMergePolicy extends MergePolicy {
 
   // User-specified maxMergeAtOnce. In practice we always take the min of its
   // value and segsPerTier to avoid suboptimal merging.
-  private int maxMergeAtOnce = 10;
+  private int maxMergeAtOnce = 20;
   private long maxMergedSegmentBytes = 5 * 1024 * 1024 * 1024L;
 
   private long floorSegmentBytes = 200 * 1024 * 1024L;
-  private double segsPerTier = 10.0;
+  private double segsPerTier = 20.0;
   private double forceMergeDeletesPctAllowed = 10.0;
   private double deletesPctAllowed = 20.0;
 

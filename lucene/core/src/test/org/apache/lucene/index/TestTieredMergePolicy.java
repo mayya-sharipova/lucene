@@ -828,7 +828,7 @@ public class TestTieredMergePolicy extends BaseMergePolicyTestCase {
     // Make sure TMP always merged equal-number-of-docs segments:
     for (LeafReaderContext ctx : r.leaves()) {
       int numDocs = ctx.reader().numDocs();
-      assertTrue("got numDocs=" + numDocs, numDocs == 100 || numDocs == 1000 || numDocs == 10000);
+      assertTrue("got numDocs=" + numDocs, numDocs == 100 || numDocs == 2000 || numDocs == 20000);
     }
     r.close();
     w.close();
@@ -846,7 +846,7 @@ public class TestTieredMergePolicy extends BaseMergePolicyTestCase {
     }
     for (int j = 0; j < 8; ++j) {
       infos.add(
-          makeSegmentCommitInfo("_" + i, 1000, 0, 102, IndexWriter.SOURCE_FLUSH)); // 102MB flushes
+          makeSegmentCommitInfo("_" + i, 1000, 0, 51, IndexWriter.SOURCE_FLUSH)); // 102MB flushes
     }
 
     // Only 8 segments on 1 tier in addition to the max-size segments, nothing to do
@@ -857,12 +857,12 @@ public class TestTieredMergePolicy extends BaseMergePolicyTestCase {
             new MockMergeContext(SegmentCommitInfo::getDelCount));
     assertNull(mergeSpec);
 
-    for (int j = 0; j < 5; ++j) {
+    for (int j = 0; j < 15; ++j) {
       infos.add(
-          makeSegmentCommitInfo("_" + i, 1000, 0, 102, IndexWriter.SOURCE_FLUSH)); // 102MB flushes
+          makeSegmentCommitInfo("_" + i, 1000, 0, 51, IndexWriter.SOURCE_FLUSH)); // 102MB flushes
     }
 
-    // Now 13 segments on 1 tier in addition to the max-size segments, 10 of them should get merged
+    // Now 23 segments on 1 tier in addition to the max-size segments, 20 of them should get merged
     // in one merge
     mergeSpec =
         policy.findMerges(
@@ -872,7 +872,7 @@ public class TestTieredMergePolicy extends BaseMergePolicyTestCase {
     assertNotNull(mergeSpec);
     assertEquals(1, mergeSpec.merges.size());
     OneMerge merge = mergeSpec.merges.get(0);
-    assertEquals(10, merge.segments.size());
+    assertEquals(20, merge.segments.size());
   }
 
   /** Make sure that singleton merges are considered when the max number of deletes is crossed. */
@@ -929,7 +929,7 @@ public class TestTieredMergePolicy extends BaseMergePolicyTestCase {
 
     TieredMergePolicy mp = new TieredMergePolicy();
 
-    for (int i = 0; i < 11; ++i) {
+    for (int i = 0; i < 21; ++i) {
       segmentInfos.add(
           makeSegmentCommitInfo(
               "_" + segNameGenerator.getAndIncrement(),
