@@ -521,13 +521,26 @@ public class TieredMergePolicy extends MergePolicy {
         final List<SegmentCommitInfo> candidate = new ArrayList<>();
         boolean hitTooLarge = false;
         long bytesThisMerge = 0;
-        for (int idx = startIdx;
-            idx < sortedEligible.size()
+
+        // add the 1st largest segment
+        SegmentSizeAndDocs segSizeDocs = sortedEligible.get(startIdx);
+        long segBytes = segSizeDocs.sizeInBytes;
+        candidate.add(segSizeDocs.segInfo);
+        bytesThisMerge += segBytes;
+        if (totAfterMergeBytes + segBytes > maxMergedSegmentBytes) {
+          hitTooLarge = true;
+        } else {
+          totAfterMergeBytes += segBytes;
+        }
+
+        // add smallest segments
+        for (int idx = sortedEligible.size() - 1;
+            idx > startIdx
                 && candidate.size() < mergeFactor
                 && bytesThisMerge < maxMergedSegmentBytes;
-            idx++) {
-          final SegmentSizeAndDocs segSizeDocs = sortedEligible.get(idx);
-          final long segBytes = segSizeDocs.sizeInBytes;
+            idx--) {
+          segSizeDocs = sortedEligible.get(idx);
+          segBytes = segSizeDocs.sizeInBytes;
 
           if (totAfterMergeBytes + segBytes > maxMergedSegmentBytes) {
             hitTooLarge = true;
@@ -584,7 +597,7 @@ public class TieredMergePolicy extends MergePolicy {
           break;
         }
 
-        final MergeScore score = score(candidate, hitTooLarge, segInfosSizes);
+        final MergeScore score = score(candidate, true, segInfosSizes);
         if (verbose(mergeContext)) {
           message(
               "  maybe="
@@ -652,7 +665,7 @@ public class TieredMergePolicy extends MergePolicy {
   /** Expert: scores one merge; subclasses can override. */
   protected MergeScore score(
       List<SegmentCommitInfo> candidate,
-      boolean hitTooLarge,
+      boolean ignoreSkew,
       Map<SegmentCommitInfo, SegmentSizeAndDocs> segmentsSizes)
       throws IOException {
     long totBeforeMergeBytes = 0;
@@ -672,7 +685,7 @@ public class TieredMergePolicy extends MergePolicy {
     // lopsided merges (skew near 1.0) is no good; it means
     // O(N^2) merge cost over time:
     final double skew;
-    if (hitTooLarge) {
+    if (ignoreSkew) {
       // Pretend the merge has perfect skew; skew doesn't
       // matter in this case because this merge will not
       // "cascade" and so it cannot lead to N^2 merge cost
