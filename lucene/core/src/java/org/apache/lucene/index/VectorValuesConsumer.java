@@ -23,6 +23,7 @@ import org.apache.lucene.codecs.KnnFieldVectorsWriter;
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.KnnVectorsWriter;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FlushInfo;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.IOUtils;
@@ -58,8 +59,9 @@ class VectorValuesConsumer {
                 + fieldName
                 + "\" was indexed as vectors but codec does not support vectors");
       }
+      IOContext ioContext = new IOContext(new FlushInfo(0, 0));
       SegmentWriteState initialWriteState =
-          new SegmentWriteState(infoStream, directory, segmentInfo, null, null, IOContext.DEFAULT);
+          new SegmentWriteState(infoStream, directory, segmentInfo, null, null, ioContext);
       writer = fmt.fieldsWriter(initialWriteState);
       accountable = writer;
     }
