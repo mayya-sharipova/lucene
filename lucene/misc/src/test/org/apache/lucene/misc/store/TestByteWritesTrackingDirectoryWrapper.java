@@ -18,6 +18,11 @@ package org.apache.lucene.misc.store;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.KnnFloatVectorField;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FlushInfo;
@@ -25,6 +30,7 @@ import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MergeInfo;
 import org.apache.lucene.tests.store.BaseDirectoryTestCase;
+import org.apache.lucene.util.VectorUtil;
 
 public class TestByteWritesTrackingDirectoryWrapper extends BaseDirectoryTestCase {
 
@@ -102,6 +108,53 @@ public class TestByteWritesTrackingDirectoryWrapper extends BaseDirectoryTestCas
 
     assertEquals(expectedFlushBytes, dir.getFlushedBytes());
     assertEquals(expectedMergeBytes, dir.getMergedBytes());
+  }
+
+  public void testVectors() throws IOException {
+    final int numDocs = 10_000;
+    final int dim = 100;
+    VectorSimilarityFunction similarityFunction = VectorSimilarityFunction.DOT_PRODUCT;
+    IndexWriterConfig iwc = new IndexWriterConfig().setOpenMode(IndexWriterConfig.OpenMode.CREATE);
+
+    try (ByteWritesTrackingDirectoryWrapper dir =
+        new ByteWritesTrackingDirectoryWrapper(newDirectory(), false)) {
+      try (IndexWriter w = new IndexWriter(dir, iwc)) {
+        for (int i = 0; i < numDocs; i++) {
+          Document doc = new Document();
+          float[] v = randomVector(dim);
+          doc.add(new KnnFloatVectorField("knn_vector", v, similarityFunction));
+          w.addDocument(doc);
+          if (i % 300 == 0) {
+            w.flush();
+          }
+          if (i % 1000 == 0) {
+            w.forceMerge(1);
+          }
+        }
+      }
+      System.out.println(
+          dir.getFlushedBytes()
+              + " "
+              + dir.getMergedBytes()
+              + " "
+              + dir.getMergedBytes() * 1.0 / dir.getFlushedBytes());
+    }
+  }
+
+  private float[] randomVector(int dim) {
+    assert dim > 0;
+    float[] v = new float[dim];
+    double squareSum = 0.0;
+    // keep generating until we don't get a zero-length vector
+    while (squareSum == 0.0) {
+      squareSum = 0.0;
+      for (int i = 0; i < dim; i++) {
+        v[i] = random().nextFloat();
+        squareSum += v[i] * v[i];
+      }
+    }
+    VectorUtil.l2normalize(v);
+    return v;
   }
 
   @Override
