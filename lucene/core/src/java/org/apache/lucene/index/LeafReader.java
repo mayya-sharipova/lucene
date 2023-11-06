@@ -24,6 +24,7 @@ import org.apache.lucene.search.TopDocsCollector;
 import org.apache.lucene.search.TopKnnCollector;
 import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.hnsw.BlockingFloatHeap;
 
 /**
  * {@code LeafReader} is an abstract class, providing an interface for accessing an index. Search of
@@ -240,11 +241,12 @@ public abstract non-sealed class LeafReader extends IndexReader {
    * @param acceptDocs {@link Bits} that represents the allowed documents to match, or {@code null}
    *     if they are all allowed to match.
    * @param visitedLimit the maximum number of nodes that the search is allowed to visit
+   * @param globalScoreQueue the global score queue used to track the top scores collected across all leaves
    * @return the k nearest neighbor documents, along with their (searchStrategy-specific) scores.
    * @lucene.experimental
    */
   public final TopDocs searchNearestVectors(
-      String field, float[] target, int k, Bits acceptDocs, int visitedLimit) throws IOException {
+      String field, float[] target, int k, Bits acceptDocs, int visitedLimit, BlockingFloatHeap globalScoreQueue) throws IOException {
     FieldInfo fi = getFieldInfos().fieldInfo(field);
     if (fi == null || fi.getVectorDimension() == 0) {
       // The field does not exist or does not index vectors
