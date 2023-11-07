@@ -30,27 +30,23 @@ public final class BlockingFloatHeap {
    * <p>If the number of values would exceed the heap's maxSize, the least value is discarded
    *
    * @param value the value to add
-   * @return {@code true} if the value was added to this heap {@code false} if the value was not
-   *     added because the heap was full and the value is smaller than the top of the heap
+   * @return the new 'top' element in the queue.
    */
-  public boolean offer(float value) {
-    boolean valueAdded = true;
-
+  public float offer(float value) {
     lock.lock();
     try {
       if (size < maxSize) {
         push(value);
+        return heap[1];
       } else {
         if (value >= heap[1]) {
           updateTop(value);
-        } else {
-          valueAdded = false;
         }
+        return heap[1];
       }
     } finally {
       lock.unlock();
     }
-    return valueAdded;
   }
 
   /**

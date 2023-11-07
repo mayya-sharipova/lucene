@@ -17,6 +17,7 @@
 
 package org.apache.lucene.search;
 
+import org.apache.lucene.util.hnsw.BlockingFloatHeap;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 
 /**
@@ -28,24 +29,41 @@ import org.apache.lucene.util.hnsw.NeighborQueue;
 public final class TopKnnCollector extends AbstractKnnCollector {
 
   private final NeighborQueue queue;
+  private final int interval = 0x3ff;
+  private final BlockingFloatHeap globalSimilarityQueue;
+  private float cachedGlobalMinScore = Float.NEGATIVE_INFINITY;
 
   /**
    * @param k the number of neighbors to collect
    * @param visitLimit how many vector nodes the results are allowed to visit
    */
-  public TopKnnCollector(int k, int visitLimit) {
+  public TopKnnCollector(int k, int visitLimit, BlockingFloatHeap globalSimilarityQueue) {
     super(k, visitLimit);
     this.queue = new NeighborQueue(k, false);
+    this.globalSimilarityQueue = globalSimilarityQueue;
   }
 
   @Override
   public boolean collect(int docId, float similarity) {
-    return queue.insertWithOverflow(docId, similarity);
+    boolean result = queue.insertWithOverflow(docId, similarity);
+    if (globalSimilarityQueue != null) {
+      // periodically do the update with the global queue
+      if ((visitedCount & interval) == 0) {
+        cachedGlobalMinScore = globalSimilarityQueue.offer(similarity);
+      } else {
+        cachedGlobalMinScore = queue.topScore();
+      }
+    }
+    return result;
   }
 
   @Override
   public float minCompetitiveSimilarity() {
-    return queue.size() >= k() ? queue.topScore() : Float.NEGATIVE_INFINITY;
+    if (globalSimilarityQueue == null)  {
+      return queue.size() >= k() ? queue.topScore() : Float.NEGATIVE_INFINITY;
+    } else {
+      return cachedGlobalMinScore;
+    }
   }
 
   @Override

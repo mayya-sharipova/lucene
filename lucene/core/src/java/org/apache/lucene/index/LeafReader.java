@@ -256,7 +256,7 @@ public abstract non-sealed class LeafReader extends IndexReader {
     if (k == 0) {
       return TopDocsCollector.EMPTY_TOPDOCS;
     }
-    KnnCollector collector = new TopKnnCollector(k, visitedLimit);
+    KnnCollector collector = new TopKnnCollector(k, visitedLimit, globalScoreQueue);
     searchNearestVectors(field, target, collector, acceptDocs);
     return collector.topDocs();
   }
@@ -283,11 +283,12 @@ public abstract non-sealed class LeafReader extends IndexReader {
    * @param acceptDocs {@link Bits} that represents the allowed documents to match, or {@code null}
    *     if they are all allowed to match.
    * @param visitedLimit the maximum number of nodes that the search is allowed to visit
+   **@param globalScoreQueue the global score queue used to track the top scores collected across all leaves
    * @return the k nearest neighbor documents, along with their (searchStrategy-specific) scores.
    * @lucene.experimental
    */
   public final TopDocs searchNearestVectors(
-      String field, byte[] target, int k, Bits acceptDocs, int visitedLimit) throws IOException {
+      String field, byte[] target, int k, Bits acceptDocs, int visitedLimit, BlockingFloatHeap globalScoreQueue) throws IOException {
     FieldInfo fi = getFieldInfos().fieldInfo(field);
     if (fi == null || fi.getVectorDimension() == 0) {
       // The field does not exist or does not index vectors
@@ -297,7 +298,7 @@ public abstract non-sealed class LeafReader extends IndexReader {
     if (k == 0) {
       return TopDocsCollector.EMPTY_TOPDOCS;
     }
-    KnnCollector collector = new TopKnnCollector(k, visitedLimit);
+    KnnCollector collector = new TopKnnCollector(k, visitedLimit, globalScoreQueue);
     searchNearestVectors(field, target, collector, acceptDocs);
     return collector.topDocs();
   }
