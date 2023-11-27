@@ -41,44 +41,50 @@ public class TestTopKnnResults extends LuceneTestCase {
 
   public void testConcurrentGlobalMinSimilarity() {
     MaxScoreAccumulator globalMinSimAcc = new MaxScoreAccumulator();
-    // greediness = 0.2; allowing to consider 4 top results out of 5
-    TopKnnCollector results1 = new TopKnnCollector(5, Integer.MAX_VALUE, globalMinSimAcc, 0.2f);
-    TopKnnCollector results2 = new TopKnnCollector(5, Integer.MAX_VALUE, globalMinSimAcc, 0.2f);
+    // greediness = 0.9; allowing to have 1 non-competitive local result out of 5
+    TopKnnCollector results1 = new TopKnnCollector(5, Integer.MAX_VALUE, globalMinSimAcc, 0.9f);
+    TopKnnCollector results2 = new TopKnnCollector(5, Integer.MAX_VALUE, globalMinSimAcc, 0.9f);
 
     int[] nodes1 = new int[] {1, 2, 3, 4, 5, 6, 7};
     float[] scores1 = new float[] {1f, 2f, 3f, 4f, 5f, 6f, 7f};
     int[] nodes2 = new int[] {8, 9, 10, 11, 12, 13, 14};
-    float[] scores2 = new float[] {8f, 9f, 10f, 11f, 12f, 13f, 14f};
+    float[] scores2 = new float[] {10f, 20f, 30f, 40f, 50f, 60f, 70f};
 
     for (int i = 0; i < 5; i++) {
+      // as we haven't collected k results yet, the min competitive similarities is -inf
       assertEquals(Float.NEGATIVE_INFINITY, results2.minCompetitiveSimilarity(), 0f);
+      assertEquals(Float.NEGATIVE_INFINITY, results2.globalMinCompetitiveSimilarity(), 0f);
+
       assertEquals(Float.NEGATIVE_INFINITY, results1.minCompetitiveSimilarity(), 0f);
+      assertEquals(Float.NEGATIVE_INFINITY, results1.globalMinCompetitiveSimilarity(), 0f);
 
       results2.collect(nodes2[i], scores2[i]);
       results2.incVisitedCount(1);
       results1.collect(nodes1[i], scores1[i]);
       results1.incVisitedCount(1);
     }
-    // as soon as top k results are collected,
-    // both collectors should start to see the global min similarity with greediness
-    assertEquals(8f, results2.minCompetitiveSimilarity(), 0f);
-    assertEquals(2f, results1.minCompetitiveSimilarity(), 0f);
+    assertEquals(10f, results2.minCompetitiveSimilarity(), 0f);
+    assertEquals(10f, results2.globalMinCompetitiveSimilarity(), 0f);
+    assertEquals(1f, results1.minCompetitiveSimilarity(), 0f);
+    assertEquals(5f, results1.globalMinCompetitiveSimilarity(), 0f);
 
     results2.collect(nodes2[5], scores2[5]);
     results2.incVisitedCount(1);
     results1.collect(nodes1[5], scores1[5]);
     results1.incVisitedCount(1);
-    assertEquals(9f, results2.minCompetitiveSimilarity(), 0f);
-    assertEquals(3f, results1.minCompetitiveSimilarity(), 0f);
+    assertEquals(20f, results2.minCompetitiveSimilarity(), 0f);
+    assertEquals(20f, results2.globalMinCompetitiveSimilarity(), 0f);
+    assertEquals(2f, results1.minCompetitiveSimilarity(), 0f);
+    assertEquals(6f, results1.globalMinCompetitiveSimilarity(), 0f);
 
     results2.collect(nodes2[6], scores2[6]);
     results2.incVisitedCount(1);
     results1.collect(nodes1[6], scores1[6]);
     results1.incVisitedCount(1);
-    assertEquals(10f, results2.minCompetitiveSimilarity(), 0f);
-    // as global similarity is updated periodically, the collect1 still sees the old cached global
-    // value
-    assertEquals(4f, results1.minCompetitiveSimilarity(), 0f);
+    assertEquals(30f, results2.minCompetitiveSimilarity(), 0f);
+    assertEquals(30f, results2.globalMinCompetitiveSimilarity(), 0f);
+    assertEquals(3f, results1.minCompetitiveSimilarity(), 0f);
+    assertEquals(7f, results1.globalMinCompetitiveSimilarity(), 0f);
 
     TopDocs topDocs1 = results1.topDocs();
     TopDocs topDocs2 = results2.topDocs();
@@ -91,6 +97,6 @@ public class TestTopKnnResults extends LuceneTestCase {
       sortedScores[i] = topDocs.scoreDocs[i].score;
     }
     assertArrayEquals(new int[] {14, 13, 12, 11, 10}, sortedNodes);
-    assertArrayEquals(new float[] {14f, 13, 12f, 11f, 10f}, sortedScores, 0f);
+    assertArrayEquals(new float[] {70f, 60f, 50f, 40f, 30f}, sortedScores, 0f);
   }
 }

@@ -78,6 +78,17 @@ public interface KnnCollector {
   float minCompetitiveSimilarity();
 
   /**
+   * This method is utilized during search to ensure only competitive results are explored.
+   *
+   * <p>this method is similar to {@code minCompetitiveSimilarity} but collected across all segments
+   *
+   * @return the current global minimum competitive similarity in the collection
+   */
+  default float globalMinCompetitiveSimilarity() {
+    return minCompetitiveSimilarity();
+  }
+
+  /**
    * This drains the collected nearest kNN results and returns them in a new {@link TopDocs}
    * collection, ordered by score descending. NOTE: This is generally a destructive action and the
    * collector should not be used after topDocs() is called.

@@ -220,11 +220,10 @@ public class HnswGraphSearcher {
 
     // A bound that holds the minimum similarity to the query vector that a candidate vector must
     // have to be considered.
-    float minAcceptedSimilarity = results.minCompetitiveSimilarity();
     while (candidates.size() > 0 && results.earlyTerminated() == false) {
       // get the best candidate (closest or best scoring)
       float topCandidateSimilarity = candidates.topScore();
-      if (topCandidateSimilarity < minAcceptedSimilarity) {
+      if (topCandidateSimilarity < results.minCompetitiveSimilarity()) {
         break;
       }
 
@@ -242,12 +241,10 @@ public class HnswGraphSearcher {
         }
         float friendSimilarity = scorer.score(friendOrd);
         results.incVisitedCount(1);
-        if (friendSimilarity > minAcceptedSimilarity) {
+        if (friendSimilarity > results.globalMinCompetitiveSimilarity()) {
           candidates.add(friendOrd, friendSimilarity);
           if (acceptOrds == null || acceptOrds.get(friendOrd)) {
-            if (results.collect(friendOrd, friendSimilarity)) {
-              minAcceptedSimilarity = results.minCompetitiveSimilarity();
-            }
+            results.collect(friendOrd, friendSimilarity);
           }
         }
       }
