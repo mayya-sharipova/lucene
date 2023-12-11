@@ -70,6 +70,11 @@ public final class OrdinalTranslatedKnnCollector implements KnnCollector {
   }
 
   @Override
+  public float globalMinCompetitiveSimilarity() {
+    return in.globalMinCompetitiveSimilarity();
+  }
+
+  @Override
   public TopDocs topDocs() {
     TopDocs td = in.topDocs();
     return new TopDocs(

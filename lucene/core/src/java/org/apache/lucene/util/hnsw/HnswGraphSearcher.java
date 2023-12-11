@@ -22,10 +22,7 @@ import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 import java.io.IOException;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.TopKnnCollector;
-import org.apache.lucene.util.BitSet;
-import org.apache.lucene.util.Bits;
-import org.apache.lucene.util.FixedBitSet;
-import org.apache.lucene.util.SparseFixedBitSet;
+import org.apache.lucene.util.*;
 
 /**
  * Searches an HNSW graph to find nearest neighbors to a query vector. For more background on the
@@ -39,6 +36,7 @@ public class HnswGraphSearcher {
   private final NeighborQueue candidates;
 
   private BitSet visited;
+  private InfoStream infoStream = InfoStream.getDefault();
 
   /**
    * Creates a new graph searcher.
@@ -223,7 +221,11 @@ public class HnswGraphSearcher {
     while (candidates.size() > 0 && results.earlyTerminated() == false) {
       // get the best candidate (closest or best scoring)
       float topCandidateSimilarity = candidates.topScore();
-      if (topCandidateSimilarity < results.minCompetitiveSimilarity()) {
+      float minCompetitiveSimilarity = results.minCompetitiveSimilarity();
+      if (infoStream.isEnabled("KnnVectorQuery")) {
+        infoStream.message("knn", "minCompetitiveSimilarity:" + minCompetitiveSimilarity);
+      }
+      if (topCandidateSimilarity < minCompetitiveSimilarity) {
         break;
       }
 
@@ -241,7 +243,12 @@ public class HnswGraphSearcher {
         }
         float friendSimilarity = scorer.score(friendOrd);
         results.incVisitedCount(1);
-        if (friendSimilarity > results.globalMinCompetitiveSimilarity()) {
+        float globalMinCompetitiveSimilarity = results.globalMinCompetitiveSimilarity();
+        if (infoStream.isEnabled("KnnVectorQuery")) {
+          infoStream.message(
+              "knn", "globalMinCompetitiveSimilarity:" + globalMinCompetitiveSimilarity);
+        }
+        if (friendSimilarity > globalMinCompetitiveSimilarity) {
           candidates.add(friendOrd, friendSimilarity);
           if (acceptOrds == null || acceptOrds.get(friendOrd)) {
             results.collect(friendOrd, friendSimilarity);
