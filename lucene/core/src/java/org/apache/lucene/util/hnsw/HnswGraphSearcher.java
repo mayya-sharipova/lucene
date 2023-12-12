@@ -36,7 +36,6 @@ public class HnswGraphSearcher {
   private final NeighborQueue candidates;
 
   private BitSet visited;
-  private InfoStream infoStream = InfoStream.getDefault();
 
   /**
    * Creates a new graph searcher.
@@ -222,9 +221,6 @@ public class HnswGraphSearcher {
       // get the best candidate (closest or best scoring)
       float topCandidateSimilarity = candidates.topScore();
       float minCompetitiveSimilarity = results.minCompetitiveSimilarity();
-      if (infoStream.isEnabled("KnnVectorQuery")) {
-        infoStream.message("knn", "minCompetitiveSimilarity:" + minCompetitiveSimilarity);
-      }
       if (topCandidateSimilarity < minCompetitiveSimilarity) {
         break;
       }
@@ -244,10 +240,6 @@ public class HnswGraphSearcher {
         float friendSimilarity = scorer.score(friendOrd);
         results.incVisitedCount(1);
         float globalMinCompetitiveSimilarity = results.globalMinCompetitiveSimilarity();
-        if (infoStream.isEnabled("KnnVectorQuery")) {
-          infoStream.message(
-              "knn", "globalMinCompetitiveSimilarity:" + globalMinCompetitiveSimilarity);
-        }
         if (friendSimilarity > globalMinCompetitiveSimilarity) {
           candidates.add(friendOrd, friendSimilarity);
           if (acceptOrds == null || acceptOrds.get(friendOrd)) {

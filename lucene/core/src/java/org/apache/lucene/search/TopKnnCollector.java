@@ -17,7 +17,6 @@
 
 package org.apache.lucene.search;
 
-import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 
 /**
@@ -38,7 +37,6 @@ public final class TopKnnCollector extends AbstractKnnCollector {
   private float cachedGlobalMinSim = Float.NEGATIVE_INFINITY;
   private float minCompetitiveSim = Float.NEGATIVE_INFINITY;
   private float globalMinCompetitiveSim = Float.NEGATIVE_INFINITY;
-  private InfoStream infoStream = InfoStream.getDefault();
 
   /**
    * @param k the number of neighbors to collect
@@ -85,14 +83,6 @@ public final class TopKnnCollector extends AbstractKnnCollector {
           MaxScoreAccumulator.DocAndScore docAndScore = globalMinSimAcc.get();
           cachedGlobalMinSim = docAndScore.score;
           globalSimUpdated = true;
-          if (infoStream.isEnabled("TopKnnCollector")) {
-            infoStream.message(
-                "knn",
-                "***** cachedGlobalMinSim:"
-                    + cachedGlobalMinSim
-                    + "***** nonCompetitiveQueue:"
-                    + nonCompetitiveQueue.topScore());
-          }
         }
         if (localSimUpdated || globalSimUpdated) {
           globalMinCompetitiveSim =
