@@ -15,19 +15,5 @@
  * limitations under the License.
  */
 
-/** Various third party contributions and new ideas */
-module org.apache.lucene.sandbox {
-  requires org.apache.lucene.core;
-  requires org.apache.lucene.queries;
-
-  exports org.apache.lucene.payloads;
-  exports org.apache.lucene.sandbox.codecs.idversion;
-  exports org.apache.lucene.sandbox.codecs.pq;
-  exports org.apache.lucene.sandbox.document;
-  exports org.apache.lucene.sandbox.queries;
-  exports org.apache.lucene.sandbox.search;
-  exports org.apache.lucene.sandbox.index;
-
-  provides org.apache.lucene.codecs.PostingsFormat with
-      org.apache.lucene.sandbox.codecs.idversion.IDVersionPostingsFormat;
-}
+/** This package implements Product Quantization for vector search */
+package org.apache.lucene.sandbox.codecs.pq;
