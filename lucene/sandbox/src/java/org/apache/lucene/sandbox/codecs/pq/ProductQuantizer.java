@@ -18,19 +18,29 @@
 package org.apache.lucene.sandbox.codecs.pq;
 
 import java.io.IOException;
+
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 /** ProductQuantizer is a quantization algorithm that quantizes a vector into a byte array. */
 public class ProductQuantizer {
+  // The number of centroids in a single subquantizer
+  static final int NUM_CENTROIDS = 256;
+  // The number of samples to use for training subquantizer
+  static final int NUM_SAMPLES = 128 * NUM_CENTROIDS;
+  // The number of random restarts of clustering to use when constructing the codebooks.
+  private static final int BOOK_CONSTRUCTION_K_MEANS_RESTARTS = 5;
+  // The number of iterations to run k-means for when constructing the codebooks.
+  private static final int BOOK_CONSTRUCTION_K_MEANS_ITR = 8;
+
+
   enum DistanceFunction {
     COSINE,
     L2,
     INNER_PRODUCT
   }
 
-  static final int NUM_CENTROIDS = 256;
 
   private final int numDims;
   private final int numSubQuantizer;
@@ -48,11 +58,14 @@ public class ProductQuantizer {
   }
 
   public static ProductQuantizer create(
-      RandomAccessVectorValues.Floats reader,
+      RandomAccessVectorValues.Floats origin,
       int numSubQuantizer,
       DistanceFunction distanceFunction,
       long seed)
       throws IOException {
+    System.out.format("Sampling %d from %d docs %n", NUM_SAMPLES, origin.size());
+    RandomAccessVectorValues.Floats reader = new SampleReader(origin, NUM_SAMPLES, seed);
+
     int subVectorLength = reader.dimension() / numSubQuantizer;
     float[][][] centroids = new float[numSubQuantizer][][];
     for (int i = 0; i < numSubQuantizer; i++) {

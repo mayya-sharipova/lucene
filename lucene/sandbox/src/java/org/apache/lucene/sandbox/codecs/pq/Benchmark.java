@@ -40,11 +40,9 @@ import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 public class Benchmark {
   private static final Path dirPath = Paths.get("/Users/mayya/Elastic/knn/ann-prototypes/data");
   private static final String vectorFile = "corpus-quora-E5-small.fvec";
-  private static final String trainFile = "corpus-quora-E5-small.fvec";
   private static final String queryFile = "queries-quora-E5-small.fvec";
   private static final int numDims = 384; //768;
   private static final int numDocs = 522_931;
-  private static final int numTraining = 522_931;
   private static final int numQuery = 1_000;
   private static DistanceFunction distanceFunction = DistanceFunction.COSINE;
   private static int[] numSubQuantizers = new int[] {24};
@@ -95,12 +93,8 @@ public class Benchmark {
     for (int numSubQuantizer : numSubQuantizers) {
       final ProductQuantizer pq;
       try (MMapDirectory directory = new MMapDirectory(dirPath);
-          IndexInput trainInput = directory.openInput(trainFile, IOContext.DEFAULT);
           IndexInput vectorInput = directory.openInput(vectorFile, IOContext.DEFAULT);
           IndexInput queryInput = directory.openInput(queryFile, IOContext.READONCE); ) {
-        RandomAccessVectorValues.Floats trainingVectorValues =
-            new OffHeapFloatVectorValues.DenseOffHeapVectorValues(
-                numDims, numTraining, trainInput, byteSize);
         RandomAccessVectorValues.Floats vectorValues =
             new OffHeapFloatVectorValues.DenseOffHeapVectorValues(
                 numDims, numDocs, vectorInput, byteSize);
@@ -109,11 +103,11 @@ public class Benchmark {
                 numDims, numQuery, queryInput, byteSize);
 
         long start = System.nanoTime();
-        pq = ProductQuantizer.create(trainingVectorValues, numSubQuantizer, distanceFunction, seed);
+        pq = ProductQuantizer.create(vectorValues, numSubQuantizer, distanceFunction, seed);
         long elapsed = System.nanoTime() - start;
         System.out.format(
-            "Create product quantizer using %d training vectors and %d sub-quantizers in %d milliseconds%n",
-            numTraining, numSubQuantizer, TimeUnit.NANOSECONDS.toMillis(elapsed));
+            "Create product quantizer from %d  vectors and %d sub-quantizers in %d milliseconds%n",
+            numDocs, numSubQuantizer, TimeUnit.NANOSECONDS.toMillis(elapsed));
 
         final byte[][] codes = new byte[numDocs][];
         long startEncode = System.nanoTime();

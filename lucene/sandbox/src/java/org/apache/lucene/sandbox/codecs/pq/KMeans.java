@@ -24,7 +24,11 @@ import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 /** KMeans clustering algorithm. */
 public class KMeans {
-  private static final int NUM_ITERS = 10;
+  // The number of random restarts of clustering to use when constructing the codebooks.
+  private static final int BOOK_CONSTRUCTION_K_MEANS_RESTARTS = 5;
+  // The number of iterations to run k-means for when constructing the codebooks.
+  private static final int BOOK_CONSTRUCTION_K_MEANS_ITR = 8;
+
   private final RandomAccessVectorValues.Floats reader;
   private final int numDocs;
   private int startOffset;
@@ -63,7 +67,7 @@ public class KMeans {
 
   private float[][] runKMeans(float[][] centroids) throws IOException {
     int[] documentCentroids = new int[numDocs];
-    for (int iter = 0; iter < NUM_ITERS; iter++) {
+    for (int iter = 0; iter < BOOK_CONSTRUCTION_K_MEANS_ITR; iter++) {
       centroids = runKMeansStep(centroids, documentCentroids);
     }
     return centroids;
