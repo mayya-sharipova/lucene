@@ -96,11 +96,9 @@ public class Benchmark {
           IndexInput vectorInput = directory.openInput(vectorFile, IOContext.DEFAULT);
           IndexInput queryInput = directory.openInput(queryFile, IOContext.READONCE); ) {
         RandomAccessVectorValues.Floats vectorValues =
-            new OffHeapFloatVectorValues.DenseOffHeapVectorValues(
-                numDims, numDocs, vectorInput, byteSize);
+            new VectorsReaderWithOffset(vectorInput, numDocs, numDims, byteSize, Float.BYTES);
         RandomAccessVectorValues.Floats queryVectorValues =
-            new OffHeapFloatVectorValues.DenseOffHeapVectorValues(
-                numDims, numQuery, queryInput, byteSize);
+           new VectorsReaderWithOffset(queryInput, numQuery, numDims, byteSize, Float.BYTES);
 
         long start = System.nanoTime();
         pq = ProductQuantizer.create(vectorValues, numSubQuantizer, distanceFunction, seed);

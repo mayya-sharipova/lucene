@@ -17,18 +17,15 @@
 package org.apache.lucene.sandbox.codecs.pq;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Random;
+
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 /** KMeans clustering algorithm. */
 public class KMeans {
-  // The number of random restarts of clustering to use when constructing the codebooks.
-  private static final int BOOK_CONSTRUCTION_K_MEANS_RESTARTS = 5;
-  // The number of iterations to run k-means for when constructing the codebooks.
-  private static final int BOOK_CONSTRUCTION_K_MEANS_ITR = 8;
-
   private final RandomAccessVectorValues.Floats reader;
   private final int numDocs;
   private int startOffset;
@@ -50,7 +47,27 @@ public class KMeans {
     this.random = new Random(seed);
   }
 
-  public float[][] computeCentroids() throws IOException {
+  public float[][] computeCentroids(int restarts, int iters) throws IOException {
+    int[] documentCentroids = new int[numDocs];
+    double minSquaredDist = Double.MAX_VALUE;
+    double squaredDist = 0;
+    float[][] bestCentroids = null;
+
+    for (int restart = 0; restart < restarts; restart++) {
+      float[][] centroids = initializeCentroidsSimple();
+      for (int iter = 0; iter < iters; iter++) {
+        squaredDist = runKMeansStep(centroids, documentCentroids);
+      }
+      if (squaredDist < minSquaredDist) {
+        minSquaredDist = squaredDist;
+        bestCentroids = centroids;
+      }
+    }
+    return bestCentroids;
+  }
+
+
+  private float[][] initializeCentroidsSimple() throws IOException {
     float[][] initialCentroids = new float[numCentroids][];
     for (int index = 0; index < numDocs; index++) {
       float[] value = reader.vectorValue(index);
@@ -61,35 +78,71 @@ public class KMeans {
         initialCentroids[c] = ArrayUtil.copyOfSubArray(value, startOffset, endOffset);
       }
     }
-
-    return runKMeans(initialCentroids);
+    return  initialCentroids;
   }
 
-  private float[][] runKMeans(float[][] centroids) throws IOException {
-    int[] documentCentroids = new int[numDocs];
-    for (int iter = 0; iter < BOOK_CONSTRUCTION_K_MEANS_ITR; iter++) {
-      centroids = runKMeansStep(centroids, documentCentroids);
+  private float[][] initializeCentroidsKMeansPlusPlus() throws IOException {
+    float[][] initialCentroids = new float[numCentroids][];
+    // Choose the first centroid uniformly at random
+    int firstIndex = random.nextInt(numDocs);
+    float[] value = reader.vectorValue(firstIndex);
+    initialCentroids[0] = ArrayUtil.copyOfSubArray(value, startOffset, endOffset);
+
+    // Store distances of each point to the nearest centroid
+    float[] minDistances = new float[numDocs];
+    Arrays.fill(minDistances, Float.MAX_VALUE);
+
+    // Step 2 and 3: Select remaining centroids
+    for (int i = 1; i < numCentroids; i++) {
+      // Update distances with the new centroid
+      double totalSum = 0;
+      for (int j = 0; j < numDocs; j++) {
+        value = reader.vectorValue(j);
+        float dist = VectorUtil.squareDistance(ArrayUtil.copyOfSubArray(value, startOffset, endOffset), initialCentroids[i-1]);
+        if (dist < minDistances[j]) {
+          minDistances[j] = dist;
+        }
+        totalSum += minDistances[j];
+      }
+
+      // Randomly select next centroid
+      double r = totalSum * random.nextDouble();
+      double cummulativeSum = 0;
+      int nextCentroidIndex = -1;
+      for (int j = 0; j < numDocs; j++) {
+        cummulativeSum += minDistances[j] ;
+        if (cummulativeSum >= r) {
+          nextCentroidIndex = j;
+          break;
+        }
+      }
+      // Update centroid
+      initialCentroids[i] = ArrayUtil.copyOfSubArray(reader.vectorValue(nextCentroidIndex), startOffset, endOffset);
     }
-    return centroids;
+    return  initialCentroids;
   }
 
-  private float[][] runKMeansStep(float[][] centroids, int[] documentCentroids) throws IOException {
+
+  private double runKMeansStep(float[][] centroids, int[] documentCentroids) throws IOException {
     float[][] newCentroids = new float[centroids.length][centroids[0].length];
     int[] newCentroidSize = new int[centroids.length];
 
+    double sumSquaredDist = 0;
     for (int docID = 0; docID < numDocs; docID++) {
       float[] value = reader.vectorValue(docID);
       float[] subVector = ArrayUtil.copyOfSubArray(value, startOffset, endOffset);
 
       int bestCentroid = -1;
-      float bestDist = Float.NEGATIVE_INFINITY;
+      float minSquaredDist = Float.MAX_VALUE;
       for (int c = 0; c < centroids.length; c++) {
-        float dist = 1f - VectorUtil.squareDistance(centroids[c], subVector);
-        if (dist > bestDist) {
+        float squareDist = VectorUtil.squareDistance(centroids[c], subVector);
+        if (squareDist < minSquaredDist) {
           bestCentroid = c;
-          bestDist = dist;
+          minSquaredDist = squareDist;
         }
       }
+      sumSquaredDist += minSquaredDist;
+
       newCentroidSize[bestCentroid]++;
       for (int v = 0; v < subVector.length; v++) {
         newCentroids[bestCentroid][v] += subVector[v];
@@ -99,9 +152,9 @@ public class KMeans {
 
     for (int c = 0; c < newCentroids.length; c++) {
       for (int v = 0; v < newCentroids[c].length; v++) {
-        newCentroids[c][v] /= newCentroidSize[c];
+        centroids[c][v] = newCentroids[c][v] / newCentroidSize[c];
       }
     }
-    return newCentroids;
+    return sumSquaredDist;
   }
 }

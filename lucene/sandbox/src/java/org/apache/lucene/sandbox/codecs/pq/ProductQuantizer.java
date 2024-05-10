@@ -25,14 +25,23 @@ import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 /** ProductQuantizer is a quantization algorithm that quantizes a vector into a byte array. */
 public class ProductQuantizer {
+  // The number of docs to sample to compute the coarse clustering.
+  static final int COARSE_CLUSTERING_SAMPLE_SIZE = 256 * 1024;
+  // The expected number of docs for each cluster when computing the coarse clustering.
+  // This is used to compute the number of clusters to use.
+  static final int COARSE_CLUSTERING_DOCS_PER_CLUSTER = 256 * 1024;
+  // The number of iterations to run k-means for when computing the coarse clustering.
+  static final int COARSE_CLUSTERING_KMEANS_ITR = 10;
+  // The number of random restarts of clustering to use when computing the coarse clustering.
+ static final int COARSE_CLUSTERING_KMEANS_RESTARTS = 5;
   // The number of centroids in a single subquantizer
   static final int NUM_CENTROIDS = 256;
   // The number of samples to use for training subquantizer
-  static final int NUM_SAMPLES = 128 * NUM_CENTROIDS;
+  static final int SUBQAUNTIZER_SAMPLE_SIZE = 128 * NUM_CENTROIDS;
   // The number of random restarts of clustering to use when constructing the codebooks.
-  private static final int BOOK_CONSTRUCTION_K_MEANS_RESTARTS = 5;
+  static final int BOOK_CONSTRUCTION_K_MEANS_RESTARTS = 5;
   // The number of iterations to run k-means for when constructing the codebooks.
-  private static final int BOOK_CONSTRUCTION_K_MEANS_ITR = 8;
+  static final int BOOK_CONSTRUCTION_K_MEANS_ITR = 4;
 
 
   enum DistanceFunction {
@@ -63,8 +72,8 @@ public class ProductQuantizer {
       DistanceFunction distanceFunction,
       long seed)
       throws IOException {
-    System.out.format("Sampling %d from %d docs %n", NUM_SAMPLES, origin.size());
-    RandomAccessVectorValues.Floats reader = new SampleReader(origin, NUM_SAMPLES, seed);
+    System.out.format("Sampling %d from %d docs %n", SUBQAUNTIZER_SAMPLE_SIZE, origin.size());
+    RandomAccessVectorValues.Floats reader = new SampleReader(origin, SUBQAUNTIZER_SAMPLE_SIZE, seed);
 
     int subVectorLength = reader.dimension() / numSubQuantizer;
     float[][][] centroids = new float[numSubQuantizer][][];
@@ -73,7 +82,8 @@ public class ProductQuantizer {
       int startOffset = i * subVectorLength;
       int endOffset = Math.min(startOffset + subVectorLength, reader.dimension());
       KMeans kmeans = new KMeans(reader, startOffset, endOffset, NUM_CENTROIDS, seed);
-      centroids[i] = kmeans.computeCentroids();
+      //centroids[i] = kmeans.computeCentroids(BOOK_CONSTRUCTION_K_MEANS_RESTARTS, BOOK_CONSTRUCTION_K_MEANS_ITR);
+      centroids[i] = kmeans.computeCentroids(1, 8);
     }
     return new ProductQuantizer(reader.dimension(), numSubQuantizer, centroids, distanceFunction);
   }
