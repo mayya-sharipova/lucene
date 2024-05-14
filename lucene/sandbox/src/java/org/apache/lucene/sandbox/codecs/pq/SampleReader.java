@@ -17,70 +17,71 @@
 
 package org.apache.lucene.sandbox.codecs.pq;
 
+import java.io.IOException;
+import java.util.Random;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
-import java.io.IOException;
-import java.util.Random;
-
-/**
- * A reader of vector values that samples a subset of the vectors.
- */
+/** A reader of vector values that samples a subset of the vectors. */
 public class SampleReader implements RandomAccessVectorValues.Floats {
-    private final RandomAccessVectorValues.Floats origin;
-    private final int numSamples;
-    private final int[] samples;
+  private final RandomAccessVectorValues.Floats origin;
+  private final int[] samples;
 
-    SampleReader(RandomAccessVectorValues.Floats origin, int numSamples, long seed) {
-      this.origin = origin;
-      this.numSamples = numSamples;
-      this.samples = reservoirSample(origin.size(), numSamples, seed);
-    }
+  SampleReader(RandomAccessVectorValues.Floats origin, int[] samples) {
+    this.origin = origin;
+    this.samples = samples;
+  }
 
-    @Override
-    public int size() {
-      return numSamples;
-    }
+  @Override
+  public int size() {
+    return samples.length;
+  }
 
-    @Override
-    public int dimension() {
-      return origin.dimension();
-    }
+  @Override
+  public int dimension() {
+    return origin.dimension();
+  }
 
-    @Override
-    public Floats copy() throws IOException {
-      throw new IllegalStateException("Not supported");
-    }
+  @Override
+  public Floats copy() throws IOException {
+    throw new IllegalStateException("Not supported");
+  }
 
-    @Override
-    public IndexInput getSlice() {
-      throw new IllegalStateException("Not supported");
-    }
+  @Override
+  public IndexInput getSlice() {
+    return origin.getSlice();
+  }
 
-    @Override
-    public float[] vectorValue(int targetOrd) throws IOException {
-      return origin.vectorValue(samples[targetOrd]);
-    }
+  @Override
+  public float[] vectorValue(int targetOrd) throws IOException {
+    return origin.vectorValue(samples[targetOrd]);
+  }
 
-    @Override
-    public int getVectorByteLength() {
-      return origin.getVectorByteLength();
-    }
+  @Override
+  public int getVectorByteLength() {
+    return origin.getVectorByteLength();
+  }
 
-    @Override
-    public int ordToDoc(int ord) {
-      throw new IllegalStateException("Not supported");
-    }
+  @Override
+  public int ordToDoc(int ord) {
+    throw new IllegalStateException("Not supported");
+  }
 
-    @Override
-    public Bits getAcceptOrds(Bits acceptDocs) {
-      throw new IllegalStateException("Not supported");
-    }
+  @Override
+  public Bits getAcceptOrds(Bits acceptDocs) {
+    throw new IllegalStateException("Not supported");
+  }
 
+  public static SampleReader createSampleReader(
+      RandomAccessVectorValues.Floats origin, int k, long seed) {
+    int[] samples = reservoirSample(origin.size(), k, seed);
+    return new SampleReader(origin, samples);
+  }
 
   /**
    * Sample k elements from n elements according to reservoir sampling algorithm.
+   *
    * @param n number of elements
    * @param k number of samples
    * @param seed random seed

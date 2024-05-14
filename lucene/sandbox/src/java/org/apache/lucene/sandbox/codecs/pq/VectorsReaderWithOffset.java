@@ -17,11 +17,10 @@
 
 package org.apache.lucene.sandbox.codecs.pq;
 
+import java.io.IOException;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
-
-import java.io.IOException;
 
 public class VectorsReaderWithOffset implements RandomAccessVectorValues.Floats {
   private final IndexInput slice;
@@ -48,7 +47,7 @@ public class VectorsReaderWithOffset implements RandomAccessVectorValues.Floats 
 
   @Override
   public IndexInput getSlice() {
-    throw new IllegalStateException("Not supported");
+    return slice;
   }
 
   @Override
@@ -68,7 +67,7 @@ public class VectorsReaderWithOffset implements RandomAccessVectorValues.Floats 
 
   @Override
   public int getVectorByteLength() {
-    return dimension() * Float.BYTES;
+    return byteSize;
   }
 
   @Override

@@ -26,7 +26,6 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import org.apache.lucene.codecs.lucene95.OffHeapFloatVectorValues;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.MMapDirectory;
@@ -38,15 +37,19 @@ import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 /** Benchmark for Product Quantization. */
 @SuppressForbidden(reason = "System.out required: command line tool")
 public class Benchmark {
+  private static final int NUM_DIMS = 384; // 768;
+  private static final int NUM_DOCS = 522_931;
+  private static final int NUM_QUERIES = 1_000;
+  // each file item contains 4 bytes for dims, followed by bytes for a vector
+  public static final int FILE_VECTOR_OFFSET = Float.BYTES;
+  public static final int FILE_BYTESIZE = NUM_DIMS * Float.BYTES + FILE_VECTOR_OFFSET;
   private static final Path dirPath = Paths.get("/Users/mayya/Elastic/knn/ann-prototypes/data");
   private static final String vectorFile = "corpus-quora-E5-small.fvec";
   private static final String queryFile = "queries-quora-E5-small.fvec";
-  private static final int numDims = 384; //768;
-  private static final int numDocs = 522_931;
-  private static final int numQuery = 1_000;
+
   private static DistanceFunction distanceFunction = DistanceFunction.COSINE;
   private static int[] numSubQuantizers = new int[] {24};
-  //new int[] {numDims / 32, numDims / 16, numDims / 8, numDims / 4};
+  // new int[] {numDims / 32, numDims / 16, numDims / 8, numDims / 4};
   private static final int[] topKs = new int[] {10, 100};
   private static final int[] rerankFactors = new int[] {1, 10, 100};
   private static long seed = 42L;
@@ -89,25 +92,26 @@ public class Benchmark {
   }
 
   private void runBenchmark() throws Exception {
-    final int byteSize = (numDims +  1) * Float.BYTES;
     for (int numSubQuantizer : numSubQuantizers) {
       final ProductQuantizer pq;
       try (MMapDirectory directory = new MMapDirectory(dirPath);
           IndexInput vectorInput = directory.openInput(vectorFile, IOContext.DEFAULT);
           IndexInput queryInput = directory.openInput(queryFile, IOContext.READONCE); ) {
         RandomAccessVectorValues.Floats vectorValues =
-            new VectorsReaderWithOffset(vectorInput, numDocs, numDims, byteSize, Float.BYTES);
+            new VectorsReaderWithOffset(
+                vectorInput, NUM_DOCS, NUM_DIMS, FILE_BYTESIZE, FILE_VECTOR_OFFSET);
         RandomAccessVectorValues.Floats queryVectorValues =
-           new VectorsReaderWithOffset(queryInput, numQuery, numDims, byteSize, Float.BYTES);
+            new VectorsReaderWithOffset(
+                queryInput, NUM_QUERIES, NUM_DIMS, FILE_BYTESIZE, FILE_VECTOR_OFFSET);
 
         long start = System.nanoTime();
         pq = ProductQuantizer.create(vectorValues, numSubQuantizer, distanceFunction, seed);
         long elapsed = System.nanoTime() - start;
         System.out.format(
             "Create product quantizer from %d  vectors and %d sub-quantizers in %d milliseconds%n",
-            numDocs, numSubQuantizer, TimeUnit.NANOSECONDS.toMillis(elapsed));
+            NUM_DOCS, numSubQuantizer, TimeUnit.NANOSECONDS.toMillis(elapsed));
 
-        final byte[][] codes = new byte[numDocs][];
+        final byte[][] codes = new byte[NUM_DOCS][];
         long startEncode = System.nanoTime();
         for (int i = 0; i < vectorValues.size(); i++) {
           codes[i] = pq.encode(vectorValues.vectorValue(i));
@@ -116,7 +120,7 @@ public class Benchmark {
         System.out.format(
             Locale.ROOT,
             "Encode %d vectors with %d sub-quantizers in %d milliseconds%n",
-            numDocs,
+            NUM_DOCS,
             numSubQuantizer,
             TimeUnit.NANOSECONDS.toMillis(elapsedEncode));
 
@@ -124,8 +128,8 @@ public class Benchmark {
         long[] elapsedCodes = new long[topKs.length * rerankFactors.length];
         int row = 0;
         for (int topK : topKs) {
-          int[][] groundTruths = new int[numQuery][];
-          for (int i = 0; i < numQuery; i++) {
+          int[][] groundTruths = new int[NUM_QUERIES][];
+          for (int i = 0; i < NUM_QUERIES; i++) {
             float[] candidate = queryVectorValues.vectorValue(i);
             groundTruths[i] = getNN(vectorValues, candidate, topK);
           }
@@ -133,7 +137,7 @@ public class Benchmark {
             int totalMatches = 0;
             int totalResults = 0;
             long elapsedCodeCmp = 0;
-            for (int i = 0; i < numQuery; i++) {
+            for (int i = 0; i < NUM_QUERIES; i++) {
               float[] candidate = queryVectorValues.vectorValue(i);
               long startCodeCmp = System.nanoTime();
               int[] results = getTopDocs(pq, codes, candidate, topK * rerankFactor);
@@ -197,7 +201,7 @@ public class Benchmark {
       throws IOException {
     int[] result = new int[topK];
     NeighborQueue queue = new NeighborQueue(topK, false);
-    for (int j = 0; j < numDocs; j++) {
+    for (int j = 0; j < NUM_DOCS; j++) {
       float[] doc = reader.vectorValue(j);
       float dist;
       switch (distanceFunction) {

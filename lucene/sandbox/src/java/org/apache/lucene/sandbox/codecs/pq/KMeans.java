@@ -19,36 +19,26 @@ package org.apache.lucene.sandbox.codecs.pq;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Random;
-
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 /** KMeans clustering algorithm. */
 public class KMeans {
-  private final RandomAccessVectorValues.Floats reader;
+  private final RandomAccessVectorValues.Floats vectors;
   private final int numDocs;
-  private int startOffset;
-  private int endOffset;
   private final int numCentroids;
   private final Random random;
 
-  public KMeans(
-      RandomAccessVectorValues.Floats reader,
-      int startOffset,
-      int endOffset,
-      int numCentroids,
-      long seed) {
-    this.reader = reader;
-    this.numDocs = reader.size();
+  public KMeans(RandomAccessVectorValues.Floats vectors, int numCentroids, long seed) {
+    this.vectors = vectors;
+    this.numDocs = vectors.size();
     this.numCentroids = numCentroids;
-    this.startOffset = startOffset;
-    this.endOffset = endOffset;
     this.random = new Random(seed);
   }
 
   public float[][] computeCentroids(int restarts, int iters) throws IOException {
-    int[] documentCentroids = new int[numDocs];
+    int[] docCentroids = new int[numDocs];
     double minSquaredDist = Double.MAX_VALUE;
     double squaredDist = 0;
     float[][] bestCentroids = null;
@@ -56,7 +46,7 @@ public class KMeans {
     for (int restart = 0; restart < restarts; restart++) {
       float[][] centroids = initializeCentroidsSimple();
       for (int iter = 0; iter < iters; iter++) {
-        squaredDist = runKMeansStep(centroids, documentCentroids);
+        squaredDist = runKMeansStep(centroids, docCentroids);
       }
       if (squaredDist < minSquaredDist) {
         minSquaredDist = squaredDist;
@@ -66,27 +56,26 @@ public class KMeans {
     return bestCentroids;
   }
 
-
   private float[][] initializeCentroidsSimple() throws IOException {
     float[][] initialCentroids = new float[numCentroids][];
     for (int index = 0; index < numDocs; index++) {
-      float[] value = reader.vectorValue(index);
+      float[] vector = vectors.vectorValue(index);
       if (index < numCentroids) {
-        initialCentroids[index] = ArrayUtil.copyOfSubArray(value, startOffset, endOffset);
+        initialCentroids[index] = ArrayUtil.copyOfSubArray(vector, 0, vector.length);
       } else if (random.nextDouble() < numCentroids * (1.0 / index)) {
         int c = random.nextInt(numCentroids);
-        initialCentroids[c] = ArrayUtil.copyOfSubArray(value, startOffset, endOffset);
+        initialCentroids[c] = ArrayUtil.copyOfSubArray(vector, 0, vector.length);
       }
     }
-    return  initialCentroids;
+    return initialCentroids;
   }
 
   private float[][] initializeCentroidsKMeansPlusPlus() throws IOException {
     float[][] initialCentroids = new float[numCentroids][];
     // Choose the first centroid uniformly at random
     int firstIndex = random.nextInt(numDocs);
-    float[] value = reader.vectorValue(firstIndex);
-    initialCentroids[0] = ArrayUtil.copyOfSubArray(value, startOffset, endOffset);
+    float[] value = vectors.vectorValue(firstIndex);
+    initialCentroids[0] = ArrayUtil.copyOfSubArray(value, 0, value.length);
 
     // Store distances of each point to the nearest centroid
     float[] minDistances = new float[numDocs];
@@ -97,8 +86,7 @@ public class KMeans {
       // Update distances with the new centroid
       double totalSum = 0;
       for (int j = 0; j < numDocs; j++) {
-        value = reader.vectorValue(j);
-        float dist = VectorUtil.squareDistance(ArrayUtil.copyOfSubArray(value, startOffset, endOffset), initialCentroids[i-1]);
+        float dist = VectorUtil.squareDistance(vectors.vectorValue(j), initialCentroids[i - 1]);
         if (dist < minDistances[j]) {
           minDistances[j] = dist;
         }
@@ -110,32 +98,31 @@ public class KMeans {
       double cummulativeSum = 0;
       int nextCentroidIndex = -1;
       for (int j = 0; j < numDocs; j++) {
-        cummulativeSum += minDistances[j] ;
+        cummulativeSum += minDistances[j];
         if (cummulativeSum >= r) {
           nextCentroidIndex = j;
           break;
         }
       }
       // Update centroid
-      initialCentroids[i] = ArrayUtil.copyOfSubArray(reader.vectorValue(nextCentroidIndex), startOffset, endOffset);
+      value = vectors.vectorValue(nextCentroidIndex);
+      initialCentroids[i] = ArrayUtil.copyOfSubArray(value, 0, value.length);
     }
-    return  initialCentroids;
+    return initialCentroids;
   }
 
-
-  private double runKMeansStep(float[][] centroids, int[] documentCentroids) throws IOException {
+  private double runKMeansStep(float[][] centroids, int[] docCentroids) throws IOException {
     float[][] newCentroids = new float[centroids.length][centroids[0].length];
     int[] newCentroidSize = new int[centroids.length];
 
     double sumSquaredDist = 0;
     for (int docID = 0; docID < numDocs; docID++) {
-      float[] value = reader.vectorValue(docID);
-      float[] subVector = ArrayUtil.copyOfSubArray(value, startOffset, endOffset);
+      float[] vector = vectors.vectorValue(docID);
 
       int bestCentroid = -1;
       float minSquaredDist = Float.MAX_VALUE;
       for (int c = 0; c < centroids.length; c++) {
-        float squareDist = VectorUtil.squareDistance(centroids[c], subVector);
+        float squareDist = VectorUtil.squareDistance(centroids[c], vector);
         if (squareDist < minSquaredDist) {
           bestCentroid = c;
           minSquaredDist = squareDist;
@@ -144,10 +131,10 @@ public class KMeans {
       sumSquaredDist += minSquaredDist;
 
       newCentroidSize[bestCentroid]++;
-      for (int v = 0; v < subVector.length; v++) {
-        newCentroids[bestCentroid][v] += subVector[v];
+      for (int v = 0; v < vector.length; v++) {
+        newCentroids[bestCentroid][v] += vector[v];
       }
-      documentCentroids[docID] = bestCentroid;
+      docCentroids[docID] = bestCentroid;
     }
 
     for (int c = 0; c < newCentroids.length; c++) {
