@@ -17,41 +17,43 @@
 
 package org.apache.lucene.sandbox.codecs.pq;
 
-import static org.apache.lucene.sandbox.codecs.pq.ProductQuantizer.DistanceFunction;
-
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashSet;
-import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.SuppressForbidden;
-import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 /** Benchmark for Product Quantization. */
 @SuppressForbidden(reason = "System.out required: command line tool")
 public class Benchmark {
-  private static final int NUM_DIMS = 384; // 768;
-  private static final int NUM_DOCS = 522_931;
+  private static final int NUM_DIMS = 768;
+  private static final int NUM_DOCS = 934_024;
   private static final int NUM_QUERIES = 1_000;
-  // each file item contains 4 bytes for dims, followed by bytes for a vector
   public static final int FILE_VECTOR_OFFSET = Float.BYTES;
   public static final int FILE_BYTESIZE = NUM_DIMS * Float.BYTES + FILE_VECTOR_OFFSET;
   private static final Path dirPath = Paths.get("/Users/mayya/Elastic/knn/ann-prototypes/data");
-  private static final String vectorFile = "corpus-quora-E5-small.fvec";
-  private static final String queryFile = "queries-quora-E5-small.fvec";
+  private static final String vectorFile = "corpus-wiki-cohere.fvec";
+  private static final String queryFile = "queries-wiki-cohere.fvec";
+  private static String groundTruthFile = "queries-wiki-cohere-ground-truth.fvec";
+  private static VectorSimilarityFunction vectorFunction = VectorSimilarityFunction.COSINE;
+  private static int[] numBooks = new int[] {NUM_DIMS * 4 / 64};
+  //  private static int[] numBooks =
+  //      new int[] {NUM_DIMS * 4 / 32, NUM_DIMS * 4 / 64, NUM_DIMS * 4 / 96, NUM_DIMS * 4 / 128};
+  private static float anisotropicThreshold = 0.0f;
 
-  private static DistanceFunction distanceFunction = DistanceFunction.COSINE;
-  private static int[] numSubQuantizers = new int[] {24};
-  // new int[] {numDims / 32, numDims / 16, numDims / 8, numDims / 4};
-  private static final int[] topKs = new int[] {10, 100};
-  private static final int[] rerankFactors = new int[] {1, 10, 100};
+  private static boolean useHnsw = false;
+  private static final int[] topKs = new int[] {10};
+  private static final int[] rerankFactors = new int[] {1, 2, 4, 8, 10};
   private static long seed = 42L;
 
   public static void main(String[] args) throws Exception {
@@ -65,18 +67,30 @@ public class Benchmark {
           String metric = args[++i];
           switch (metric) {
             case "cosine":
-              distanceFunction = DistanceFunction.COSINE;
+              vectorFunction = VectorSimilarityFunction.COSINE;
               break;
             case "l2":
-              distanceFunction = DistanceFunction.L2;
+              vectorFunction = VectorSimilarityFunction.EUCLIDEAN;
               break;
             case "ip":
-              distanceFunction = DistanceFunction.INNER_PRODUCT;
+              vectorFunction = VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT;
               break;
             default:
               usage();
               throw new IllegalArgumentException("-metric can be 'cosine', 'l2' or 'ip' only");
           }
+          break;
+        case "-numBooks":
+          numBooks = new int[] {Integer.parseInt(args[++i])};
+          break;
+        case "-anisotropic_threshold":
+          anisotropicThreshold = Float.parseFloat(args[++i]);
+          break;
+        case "-useHnsw":
+          useHnsw = Boolean.parseBoolean(args[++i]);
+          break;
+        case "-groundTruthFile":
+          groundTruthFile = args[++i];
           break;
         default:
           usage();
@@ -87,12 +101,12 @@ public class Benchmark {
   }
 
   private static void usage() {
-    String error = "Usage: Benchmark [-metric N] [-seed N]";
+    String error = "Usage: Benchmark [-metric N] [-seed N] [-useHnsw B]";
     System.err.println(error);
   }
 
   private void runBenchmark() throws Exception {
-    for (int numSubQuantizer : numSubQuantizers) {
+    for (int nbooks : numBooks) {
       final ProductQuantizer pq;
       try (MMapDirectory directory = new MMapDirectory(dirPath);
           IndexInput vectorInput = directory.openInput(vectorFile, IOContext.DEFAULT);
@@ -104,35 +118,42 @@ public class Benchmark {
             new VectorsReaderWithOffset(
                 queryInput, NUM_QUERIES, NUM_DIMS, FILE_BYTESIZE, FILE_VECTOR_OFFSET);
 
-        long start = System.nanoTime();
-        pq = ProductQuantizer.create(vectorValues, numSubQuantizer, distanceFunction, seed);
-        long elapsed = System.nanoTime() - start;
-        System.out.format(
-            "Create product quantizer from %d  vectors and %d sub-quantizers in %d milliseconds%n",
-            NUM_DOCS, numSubQuantizer, TimeUnit.NANOSECONDS.toMillis(elapsed));
+        pq =
+            ProductQuantizer.create(
+                vectorValues, nbooks, vectorFunction, seed, useHnsw, anisotropicThreshold);
 
-        final byte[][] codes = new byte[NUM_DOCS][];
-        long startEncode = System.nanoTime();
-        for (int i = 0; i < vectorValues.size(); i++) {
-          codes[i] = pq.encode(vectorValues.vectorValue(i));
+        int[][] groundTruths = new int[NUM_QUERIES][];
+        Path path = directory.getDirectory().resolve(groundTruthFile);
+        if (Files.exists(path)) {
+          // reading the ground truths from the file
+          try (IndexInput queryGroudTruthInput =
+              directory.openInput(groundTruthFile, IOContext.DEFAULT)) {
+            for (int i = 0; i < NUM_QUERIES; i++) {
+              int length = queryGroudTruthInput.readInt();
+              groundTruths[i] = new int[length];
+              for (int j = 0; j < length; j++) {
+                groundTruths[i][j] = queryGroudTruthInput.readInt();
+              }
+            }
+          }
+        } else {
+          // writing to the ground truth file
+          try (IndexOutput queryGroudTruthOutput =
+              directory.createOutput(groundTruthFile, IOContext.DEFAULT)) {
+            for (int i = 0; i < NUM_QUERIES; i++) {
+              float[] candidate = queryVectorValues.vectorValue(i);
+              groundTruths[i] = getNN(vectorValues, candidate, topKs[topKs.length - 1]);
+              queryGroudTruthOutput.writeInt(groundTruths[i].length);
+              for (int doc : groundTruths[i]) {
+                queryGroudTruthOutput.writeInt(doc);
+              }
+            }
+          }
         }
-        long elapsedEncode = System.nanoTime() - startEncode;
-        System.out.format(
-            Locale.ROOT,
-            "Encode %d vectors with %d sub-quantizers in %d milliseconds%n",
-            NUM_DOCS,
-            numSubQuantizer,
-            TimeUnit.NANOSECONDS.toMillis(elapsedEncode));
-
         float[] recalls = new float[topKs.length * rerankFactors.length];
         long[] elapsedCodes = new long[topKs.length * rerankFactors.length];
         int row = 0;
         for (int topK : topKs) {
-          int[][] groundTruths = new int[NUM_QUERIES][];
-          for (int i = 0; i < NUM_QUERIES; i++) {
-            float[] candidate = queryVectorValues.vectorValue(i);
-            groundTruths[i] = getNN(vectorValues, candidate, topK);
-          }
           for (int rerankFactor : rerankFactors) {
             int totalMatches = 0;
             int totalResults = 0;
@@ -140,13 +161,13 @@ public class Benchmark {
             for (int i = 0; i < NUM_QUERIES; i++) {
               float[] candidate = queryVectorValues.vectorValue(i);
               long startCodeCmp = System.nanoTime();
-              int[] results = getTopDocs(pq, codes, candidate, topK * rerankFactor);
+              int[] results = pq.getTopDocs(candidate, topK * rerankFactor);
               elapsedCodeCmp += System.nanoTime() - startCodeCmp;
-              totalMatches += compareNN(groundTruths[i], results);
+              totalMatches += compareNN(groundTruths[i], results, topK);
               totalResults += topK;
             }
             float recall = totalMatches / (float) totalResults;
-            elapsedCodes[row] = elapsedCodeCmp;
+            elapsedCodes[row] = TimeUnit.NANOSECONDS.toMillis(elapsedCodeCmp);
             recalls[row++] = recall;
           }
         }
@@ -158,13 +179,13 @@ public class Benchmark {
           }
         }
         System.out.println("]");
-        System.out.print("['" + numSubQuantizer + "'");
+        System.out.print("['" + nbooks + "'");
         for (float recall : recalls) {
           System.out.print(", " + recall);
         }
         System.out.println("]");
 
-        System.out.println("Performance:");
+        System.out.println("Performance (avg per query in ms):");
         System.out.print("[PQ");
         for (int topK : topKs) {
           for (int rerankFactor : rerankFactors) {
@@ -172,44 +193,28 @@ public class Benchmark {
           }
         }
         System.out.println("]");
-
-        System.out.print("['" + numSubQuantizer + "'");
+        System.out.print("['" + nbooks + "'");
+        float totalAverPerQuery = 0f;
         for (long elapsedCode : elapsedCodes) {
-          System.out.print(", " + TimeUnit.NANOSECONDS.toMillis(elapsedCode));
+          double averPerQuery = elapsedCode * 1.0 / NUM_QUERIES;
+          totalAverPerQuery += averPerQuery;
+          System.out.print(", " + averPerQuery);
         }
         System.out.println("]");
+        totalAverPerQuery = totalAverPerQuery / elapsedCodes.length;
+        System.out.println("Performance, total avg per query in ms: " + totalAverPerQuery);
+        System.out.println("____________________________________________________________");
       }
     }
   }
 
-  private int[] getTopDocs(ProductQuantizer quantizer, byte[][] codes, float[] query, int topK) {
-    NeighborQueue pq = new NeighborQueue(topK, false);
-    ProductQuantizer.DistanceRunner runner = quantizer.createDistanceRunner(query);
-    for (int i = 0; i < codes.length; i++) {
-      float res = runner.distance(codes[i]);
-      pq.insertWithOverflow(i, res);
-    }
-    int[] topDocs = new int[topK];
-    for (int k = topK - 1; k >= 0; k--) {
-      topDocs[k] = pq.topNode();
-      pq.pop();
-    }
-    return topDocs;
-  }
-
-  private int[] getNN(RandomAccessVectorValues.Floats reader, float[] query, int topK)
+  private static int[] getNN(RandomAccessVectorValues.Floats reader, float[] query, int topK)
       throws IOException {
     int[] result = new int[topK];
     NeighborQueue queue = new NeighborQueue(topK, false);
     for (int j = 0; j < NUM_DOCS; j++) {
       float[] doc = reader.vectorValue(j);
-      float dist;
-      switch (distanceFunction) {
-        case COSINE -> dist = VectorUtil.cosine(query, doc);
-        case L2 -> dist = 1f - VectorUtil.squareDistance(query, doc);
-        case INNER_PRODUCT -> dist = VectorUtil.dotProduct(query, doc);
-        default -> throw new IllegalArgumentException("Not implemented");
-      }
+      float dist = vectorFunction.compare(query, doc);
       queue.insertWithOverflow(j, dist);
     }
     for (int k = topK - 1; k >= 0; k--) {
@@ -219,10 +224,10 @@ public class Benchmark {
     return result;
   }
 
-  private int compareNN(int[] expected, int[] results) {
+  private int compareNN(int[] expected, int[] results, int topK) {
     int matched = 0;
     Set<Integer> expectedSet = new HashSet<>();
-    for (int i = 0; i < expected.length; i++) {
+    for (int i = 0; i < topK; i++) {
       expectedSet.add(expected[i]);
     }
     for (int scoreDoc : results) {

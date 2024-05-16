@@ -18,35 +18,48 @@ package org.apache.lucene.sandbox.codecs.pq;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Random;
+import java.util.Set;
+import java.util.function.Consumer;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 /** KMeans clustering algorithm. */
 public class KMeans {
+
   private final RandomAccessVectorValues.Floats vectors;
   private final int numDocs;
   private final int numCentroids;
   private final Random random;
+  private final int initializationMethod;
 
   public KMeans(RandomAccessVectorValues.Floats vectors, int numCentroids, long seed) {
     this.vectors = vectors;
     this.numDocs = vectors.size();
     this.numCentroids = numCentroids;
     this.random = new Random(seed);
+    this.initializationMethod = 0;
   }
 
-  public float[][] computeCentroids(int restarts, int iters) throws IOException {
-    int[] docCentroids = new int[numDocs];
+  public float[][] computeCentroids(
+      int restarts, int iters, Consumer<float[][]> centersTransformFunc) throws IOException {
+    short[] docCentroids = new short[numDocs];
     double minSquaredDist = Double.MAX_VALUE;
     double squaredDist = 0;
     float[][] bestCentroids = null;
 
     for (int restart = 0; restart < restarts; restart++) {
-      float[][] centroids = initializeCentroidsSimple();
+      float[][] centroids =
+          switch (initializationMethod) {
+            case 1 -> initializeCentroidsSimple();
+            case 2 -> initializeCentroidsPlusPlus();
+            default -> initializeForgy();
+          };
+
       for (int iter = 0; iter < iters; iter++) {
-        squaredDist = runKMeansStep(centroids, docCentroids);
+        squaredDist = runKMeansStep(vectors, centroids, docCentroids, false, centersTransformFunc);
       }
       if (squaredDist < minSquaredDist) {
         minSquaredDist = squaredDist;
@@ -54,6 +67,23 @@ public class KMeans {
       }
     }
     return bestCentroids;
+  }
+
+  private float[][] initializeForgy() throws IOException {
+    Set<Integer> selection = new HashSet<>();
+    while (selection.size() < numCentroids) {
+      int cand = random.nextInt(numDocs);
+      selection.add(cand);
+    }
+
+    float[][] initialCentroids = new float[numCentroids][];
+    int i = 0;
+    for (Integer selectedIdx : selection) {
+      float[] vector = vectors.vectorValue(selectedIdx);
+      initialCentroids[i] = ArrayUtil.copyOfSubArray(vector, 0, vector.length);
+      i++;
+    }
+    return initialCentroids;
   }
 
   private float[][] initializeCentroidsSimple() throws IOException {
@@ -70,7 +100,7 @@ public class KMeans {
     return initialCentroids;
   }
 
-  private float[][] initializeCentroidsKMeansPlusPlus() throws IOException {
+  private float[][] initializeCentroidsPlusPlus() throws IOException {
     float[][] initialCentroids = new float[numCentroids][];
     // Choose the first centroid uniformly at random
     int firstIndex = random.nextInt(numDocs);
@@ -111,36 +141,65 @@ public class KMeans {
     return initialCentroids;
   }
 
-  private double runKMeansStep(float[][] centroids, int[] docCentroids) throws IOException {
-    float[][] newCentroids = new float[centroids.length][centroids[0].length];
-    int[] newCentroidSize = new int[centroids.length];
+  public static double runKMeansStep(
+      RandomAccessVectorValues.Floats vectors,
+      float[][] centroids,
+      short[] docCentroids,
+      boolean useKahanSummation,
+      Consumer<float[][]> centersTransformFunc)
+      throws IOException {
+    short numCentroids = (short) centroids.length;
+
+    float[][] newCentroids = new float[numCentroids][centroids[0].length];
+    int[] newCentroidSize = new int[numCentroids];
+    float[][] compensations = null;
+    if (useKahanSummation) {
+      compensations = new float[numCentroids][centroids[0].length];
+    }
 
     double sumSquaredDist = 0;
-    for (int docID = 0; docID < numDocs; docID++) {
+    for (int docID = 0; docID < vectors.size(); docID++) {
       float[] vector = vectors.vectorValue(docID);
 
-      int bestCentroid = -1;
-      float minSquaredDist = Float.MAX_VALUE;
-      for (int c = 0; c < centroids.length; c++) {
-        float squareDist = VectorUtil.squareDistance(centroids[c], vector);
-        if (squareDist < minSquaredDist) {
-          bestCentroid = c;
-          minSquaredDist = squareDist;
+      short bestCentroid;
+      if (numCentroids == 1) {
+        bestCentroid = 0;
+      } else {
+        bestCentroid = -1;
+        float minSquaredDist = Float.MAX_VALUE;
+        for (short c = 0; c < numCentroids; c++) {
+          float squareDist = VectorUtil.squareDistance(centroids[c], vector);
+          if (squareDist < minSquaredDist) {
+            bestCentroid = c;
+            minSquaredDist = squareDist;
+          }
         }
+        sumSquaredDist += minSquaredDist;
       }
-      sumSquaredDist += minSquaredDist;
 
       newCentroidSize[bestCentroid]++;
-      for (int v = 0; v < vector.length; v++) {
-        newCentroids[bestCentroid][v] += vector[v];
+      for (int dim = 0; dim < vector.length; dim++) {
+        // For large datasets use Kahan summation to accumulate the new centres,
+        // since we can easily reach the limits of float precision
+        if (useKahanSummation) {
+          float y = vector[dim] - compensations[bestCentroid][dim];
+          float t = newCentroids[bestCentroid][dim] + y;
+          compensations[bestCentroid][dim] = (t - newCentroids[bestCentroid][dim]) - y;
+          newCentroids[bestCentroid][dim] = t;
+        } else {
+          newCentroids[bestCentroid][dim] += vector[dim];
+        }
       }
       docCentroids[docID] = bestCentroid;
     }
 
-    for (int c = 0; c < newCentroids.length; c++) {
-      for (int v = 0; v < newCentroids[c].length; v++) {
-        centroids[c][v] = newCentroids[c][v] / newCentroidSize[c];
+    for (int c = 0; c < numCentroids; c++) {
+      for (int dim = 0; dim < newCentroids[c].length; dim++) {
+        centroids[c][dim] = newCentroids[c][dim] / newCentroidSize[c];
       }
+    }
+    if (centersTransformFunc != null) {
+      centersTransformFunc.accept(centroids);
     }
     return sumSquaredDist;
   }

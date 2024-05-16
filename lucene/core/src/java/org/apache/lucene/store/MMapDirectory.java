@@ -36,6 +36,7 @@ import org.apache.lucene.util.Constants;
  * are guaranteed to fit within the address space. On 32 bit platforms also consult {@link
  * #MMapDirectory(Path, LockFactory, long)} if you have problems with mmap failing because of
  * fragmented address space. If you get an {@link IOException} about mapping failed, it is
+ * fragmented address space. If you get an {@link IOException} about mapping failed, it is
  * recommended to reduce the chunk size, until it works.
  *
  * <p>This class supports preloading files into physical memory upon opening. This can help improve

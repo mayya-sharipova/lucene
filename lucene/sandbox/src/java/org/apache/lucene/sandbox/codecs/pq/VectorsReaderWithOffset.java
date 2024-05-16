@@ -22,6 +22,7 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
+/** A reader for vectors from a file */
 public class VectorsReaderWithOffset implements RandomAccessVectorValues.Floats {
   private final IndexInput slice;
   private final int size;
@@ -75,7 +76,8 @@ public class VectorsReaderWithOffset implements RandomAccessVectorValues.Floats 
     if (lastOrd == targetOrd) {
       return value;
     }
-    slice.seek((long) targetOrd * byteSize + offset);
+    long seekPos = offset + (long) targetOrd * byteSize;
+    slice.seek(seekPos);
     slice.readFloats(value, 0, value.length);
     lastOrd = targetOrd;
     return value;
@@ -83,6 +85,6 @@ public class VectorsReaderWithOffset implements RandomAccessVectorValues.Floats 
 
   @Override
   public Floats copy() throws IOException {
-    throw new IllegalStateException("Not supported");
+    return new VectorsReaderWithOffset(slice, size, dim, byteSize, offset);
   }
 }

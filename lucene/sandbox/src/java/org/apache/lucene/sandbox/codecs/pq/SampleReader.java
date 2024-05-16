@@ -19,6 +19,7 @@ package org.apache.lucene.sandbox.codecs.pq;
 
 import java.io.IOException;
 import java.util.Random;
+import java.util.function.IntUnaryOperator;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
@@ -26,16 +27,19 @@ import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 /** A reader of vector values that samples a subset of the vectors. */
 public class SampleReader implements RandomAccessVectorValues.Floats {
   private final RandomAccessVectorValues.Floats origin;
-  private final int[] samples;
+  private final int sampleSize;
+  private final IntUnaryOperator sampleFunction;
 
-  SampleReader(RandomAccessVectorValues.Floats origin, int[] samples) {
+  SampleReader(
+      RandomAccessVectorValues.Floats origin, int sampleSize, IntUnaryOperator sampleFunction) {
     this.origin = origin;
-    this.samples = samples;
+    this.sampleSize = sampleSize;
+    this.sampleFunction = sampleFunction;
   }
 
   @Override
   public int size() {
-    return samples.length;
+    return sampleSize;
   }
 
   @Override
@@ -55,7 +59,7 @@ public class SampleReader implements RandomAccessVectorValues.Floats {
 
   @Override
   public float[] vectorValue(int targetOrd) throws IOException {
-    return origin.vectorValue(samples[targetOrd]);
+    return origin.vectorValue(sampleFunction.applyAsInt(targetOrd));
   }
 
   @Override
@@ -76,7 +80,7 @@ public class SampleReader implements RandomAccessVectorValues.Floats {
   public static SampleReader createSampleReader(
       RandomAccessVectorValues.Floats origin, int k, long seed) {
     int[] samples = reservoirSample(origin.size(), k, seed);
-    return new SampleReader(origin, samples);
+    return new SampleReader(origin, samples.length, i -> samples[i]);
   }
 
   /**
@@ -97,6 +101,32 @@ public class SampleReader implements RandomAccessVectorValues.Floats {
       int j = rnd.nextInt(i + 1);
       if (j < k) {
         reservoir[j] = i;
+      }
+    }
+    return reservoir;
+  }
+
+  /**
+   * Sample k elements from the origin array using reservoir sampling algorithm.
+   *
+   * @param origin original array
+   * @param k number of samples
+   * @param seed random seed
+   * @return array of k samples
+   */
+  public static int[] reservoirSampleFromArray(int[] origin, int k, long seed) {
+    Random rnd = new Random(seed);
+    if (k >= origin.length) {
+      return origin;
+    }
+    int[] reservoir = new int[k];
+    for (int i = 0; i < k; i++) {
+      reservoir[i] = origin[i];
+    }
+    for (int i = k; i < origin.length; i++) {
+      int j = rnd.nextInt(i + 1);
+      if (j < k) {
+        reservoir[j] = origin[i];
       }
     }
     return reservoir;
