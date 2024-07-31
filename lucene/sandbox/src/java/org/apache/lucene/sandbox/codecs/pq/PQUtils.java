@@ -17,6 +17,8 @@
 
 package org.apache.lucene.sandbox.codecs.pq;
 
+import static org.apache.lucene.sandbox.codecs.pq.ProductQuantizer.BOOK_SIZE;
+
 import java.io.IOException;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.DocIdSetIterator;
@@ -24,27 +26,30 @@ import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
 import org.apache.lucene.util.hnsw.RandomVectorScorerSupplier;
 
-import static org.apache.lucene.sandbox.codecs.pq.ProductQuantizer.BOOK_SIZE;
-
 /** A class contains various utility functions and classes for running PQ */
 public class PQUtils {
 
   static class PQScorerSupplier implements RandomVectorScorerSupplier {
     private final RandomAccessVectorValues.Bytes quantizedVectors;
+    private final float[][][] codebooks;
+    private final VectorSimilarityFunction vectorSimFunction;
     private final float[][][] distances;
 
     PQScorerSupplier(
         RandomAccessVectorValues.Bytes quantizedVectors,
-        VectorSimilarityFunction vectorFunction,
+        VectorSimilarityFunction vectorSimFunction,
         float[][][] codebooks) {
       this.quantizedVectors = quantizedVectors;
+      this.codebooks = codebooks;
+      this.vectorSimFunction = vectorSimFunction;
+
       // pre-calculate distances between all centroids of each book
       int numBooks = codebooks.length;
       this.distances = new float[numBooks][BOOK_SIZE][BOOK_SIZE];
       for (int b = 0; b < numBooks; b++) {
         for (int c1 = 0; c1 < BOOK_SIZE; c1++) {
           for (int c2 = c1; c2 < BOOK_SIZE; c2++) {
-            float dist = vectorFunction.compare(codebooks[b][c1], codebooks[b][c2]);
+            float dist = vectorSimFunction.compare(codebooks[b][c1], codebooks[b][c2]);
             distances[b][c1][c2] = dist;
             distances[b][c2][c1] = dist;
           }
@@ -64,6 +69,11 @@ public class PQUtils {
 
     public RandomVectorScorer scorer(byte[] query) throws IOException {
       return new PQScorer(quantizedVectors, distances, query);
+    }
+
+    public RandomVectorScorer queryScorer(float[] query, float[] coarseCentroid) {
+      return new QueryPQScorer(
+          quantizedVectors, vectorSimFunction, coarseCentroid, codebooks, query);
     }
   }
 
@@ -120,6 +130,45 @@ public class PQUtils {
         res += distances[i + 7][(int) queryPQCode[i + 7] & 0xFF][((int) pqCode[i + 7] & 0xFF)];
       }
       return res;
+    }
+  }
+
+  static class QueryPQScorer extends RandomVectorScorer.AbstractRandomVectorScorer {
+    private final RandomAccessVectorValues.Bytes values;
+    private final VectorSimilarityFunction vectorSimFunction;
+    private final float[][][] codebooks;
+    private final float[][] querySubVectors;
+
+    public QueryPQScorer(
+        RandomAccessVectorValues.Bytes values,
+        VectorSimilarityFunction vectorSimFunction,
+        float[] coarseCentroid,
+        float[][][] codebooks,
+        float[] query) {
+      super(values);
+      this.values = values;
+      this.vectorSimFunction = vectorSimFunction;
+      this.codebooks = codebooks;
+      int numBooks = codebooks.length;
+      int bookDim = codebooks[0][0].length;
+      this.querySubVectors = new float[numBooks][bookDim];
+      for (int b = 0; b < numBooks; b++) {
+        int offset = b * bookDim;
+        for (int dim = 0; dim < bookDim; dim++) {
+          querySubVectors[b][dim] = query[offset + dim] - coarseCentroid[offset + dim];
+        }
+      }
+    }
+
+    @Override
+    public float score(int node) throws IOException {
+      byte[] pqCode = values.vectorValue(node);
+      float score = 0f;
+      for (int b = 0; b < pqCode.length; b++) {
+        score +=
+            vectorSimFunction.compare(codebooks[b][(int) pqCode[b] & 0xFF], querySubVectors[b]);
+      }
+      return score;
     }
   }
 

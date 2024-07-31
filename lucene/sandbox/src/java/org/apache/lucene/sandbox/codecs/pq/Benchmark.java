@@ -46,12 +46,11 @@ public class Benchmark {
   private static final String queryFile = "queries-wiki-cohere.fvec";
   private static String groundTruthFile = "queries-wiki-cohere-ground-truth.fvec";
   private static VectorSimilarityFunction vectorFunction = VectorSimilarityFunction.COSINE;
-  private static int[] numBooks = new int[] {NUM_DIMS * 4 / 64};
-  //  private static int[] numBooks =
-  //      new int[] {NUM_DIMS * 4 / 32, NUM_DIMS * 4 / 64, NUM_DIMS * 4 / 96, NUM_DIMS * 4 / 128};
+  private static int[] numBooks =
+      new int[] {NUM_DIMS * 4 / 32, NUM_DIMS * 4 / 64, NUM_DIMS * 4 / 96, NUM_DIMS * 4 / 128};
   private static float anisotropicThreshold = 0.0f;
 
-  private static boolean useHnsw = false;
+  private static boolean useHnsw = true;
   private static final int[] topKs = new int[] {10};
   private static final int[] rerankFactors = new int[] {1, 2, 4, 8, 10};
   private static long seed = 42L;
