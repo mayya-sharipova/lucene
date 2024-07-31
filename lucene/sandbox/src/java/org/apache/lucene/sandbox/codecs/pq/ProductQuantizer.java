@@ -428,28 +428,8 @@ public class ProductQuantizer {
   public int[] getTopDocs(float[] query, int topK) throws IOException {
     NeighborQueue queue = new NeighborQueue(topK, false);
     if (hnswGraph != null) {
-      boolean useAsymmetricDistance = true;
-
-      // quantize query
       assert coarseCentroids.length == 1 : "number of coarse centroids must be 1";
-      RandomVectorScorer scorer;
-      if (useAsymmetricDistance) {
-        scorer = scorerSupplier.queryScorer(query, coarseCentroids[0]);
-      } else {
-        byte[] quantizedQuery = new byte[numBooks];
-        float[] residual = query;
-        for (int dim = 0; dim < query.length; dim++) {
-          residual[dim] -= coarseCentroids[0][dim];
-        }
-        float[] subVector = new float[bookDim];
-        for (int b = 0; b < numBooks; b++) {
-          int startIndex = b * bookDim;
-          System.arraycopy(residual, startIndex, subVector, 0, bookDim);
-          quantizedQuery[b] = encode(subVector, codebooks[0][b]);
-        }
-        scorer = scorerSupplier.scorer(quantizedQuery);
-      }
-
+      RandomVectorScorer scorer = scorerSupplier.queryScorer(query, coarseCentroids[0]);
       KnnCollector knnCollector =
           HnswGraphSearcher.search(scorer, topK, hnswGraph, null, Integer.MAX_VALUE);
       ScoreDoc[] scoreDocs = knnCollector.topDocs().scoreDocs;

@@ -67,10 +67,6 @@ public class PQUtils {
       throw new IllegalStateException("Not implemented");
     }
 
-    public RandomVectorScorer scorer(byte[] query) throws IOException {
-      return new PQScorer(quantizedVectors, distances, query);
-    }
-
     public RandomVectorScorer queryScorer(float[] query, float[] coarseCentroid) {
       return new QueryPQScorer(
           quantizedVectors, vectorSimFunction, coarseCentroid, codebooks, query);
